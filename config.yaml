@@ -1,0 +1,304 @@
+# Financial Advisor Bot Configuration
+# Author: Anthony Winata Salim
+# Student Number: 230726051
+
+app:
+  name: "StockBot Advisor"
+  version: "1.0.0"
+  description: "AI-Powered Financial Advisory Platform"
+  author: "Anthony Winata Salim"
+  debug_mode: false
+
+# Stock Universe Configuration
+stocks:
+  # Technology Sector (6 stocks)
+  technology:
+    - symbol: "AAPL"
+      name: "Apple Inc."
+      weight: 0.08
+    - symbol: "MSFT"
+      name: "Microsoft Corporation"
+      weight: 0.08
+    - symbol: "GOOGL"
+      name: "Alphabet Inc."
+      weight: 0.07
+    - symbol: "NVDA"
+      name: "NVIDIA Corporation"
+      weight: 0.06
+    - symbol: "META"
+      name: "Meta Platforms Inc."
+      weight: 0.06
+    - symbol: "PLTR"
+      name: "Palantir Technologies"
+      weight: 0.04
+
+  # Financial Sector (5 stocks)
+  financial:
+    - symbol: "JPM"
+      name: "JPMorgan Chase & Co."
+      weight: 0.07
+    - symbol: "BAC"
+      name: "Bank of America"
+      weight: 0.06
+    - symbol: "GS"
+      name: "Goldman Sachs"
+      weight: 0.05
+    - symbol: "MS"
+      name: "Morgan Stanley"
+      weight: 0.05
+    - symbol: "V"
+      name: "Visa Inc."
+      weight: 0.06
+
+  # Healthcare Sector (4 stocks)
+  healthcare:
+    - symbol: "JNJ"
+      name: "Johnson & Johnson"
+      weight: 0.06
+    - symbol: "PFE"
+      name: "Pfizer Inc."
+      weight: 0.05
+    - symbol: "MRNA"
+      name: "Moderna Inc."
+      weight: 0.04
+    - symbol: "UNH"
+      name: "UnitedHealth Group"
+      weight: 0.06
+
+  # Market Benchmarks (3 ETFs)
+  benchmarks:
+    - symbol: "SPY"
+      name: "S&P 500 ETF"
+      description: "Market Benchmark"
+    - symbol: "QQQ"
+      name: "NASDAQ 100 ETF"
+      description: "Tech Benchmark"
+    - symbol: "DIA"
+      name: "Dow Jones ETF"
+      description: "Blue Chip Benchmark"
+
+# Technical Indicators Configuration
+technical_indicators:
+  rsi:
+    period: 14
+    overbought: 70
+    oversold: 30
+  
+  macd:
+    fast_period: 12
+    slow_period: 26
+    signal_period: 9
+  
+  moving_averages:
+    sma_short: 20
+    sma_long: 50
+    ema_short: 12
+    ema_long: 26
+  
+  bollinger_bands:
+    period: 20
+    std_dev: 2
+  
+  stochastic:
+    k_period: 14
+    d_period: 3
+    overbought: 80
+    oversold: 20
+  
+  atr:
+    period: 14
+
+# Machine Learning Configuration
+ml_config:
+  model_type: "RandomForest"
+  parameters:
+    n_estimators: 100
+    max_depth: 10
+    min_samples_split: 5
+    min_samples_leaf: 2
+    random_state: 42
+  
+  features:
+    - "RSI"
+    - "MACD"
+    - "MACD_Signal"
+    - "BB_Position"
+    - "Stochastic_K"
+    - "Volume_Ratio"
+    - "ATR"
+  
+  training:
+    test_size: 0.2
+    lookback_period: 60
+    prediction_horizon: 5
+    confidence_threshold: 0.65
+
+# Signal Generation
+signals:
+  buy_threshold: 0.02    # 2% expected gain
+  sell_threshold: -0.02  # 2% expected loss
+  hold_range: [-0.02, 0.02]
+  
+  confidence_levels:
+    high: 0.75
+    medium: 0.60
+    low: 0.45
+
+# Risk Management
+risk_management:
+  max_position_size: 0.10  # 10% max per position
+  stop_loss: 0.05          # 5% stop loss
+  take_profit: 0.15        # 15% take profit
+  
+  risk_levels:
+    conservative:
+      volatility_cap: 0.15
+      max_drawdown: 0.10
+      position_limit: 5
+    
+    moderate:
+      volatility_cap: 0.25
+      max_drawdown: 0.15
+      position_limit: 8
+    
+    aggressive:
+      volatility_cap: 0.35
+      max_drawdown: 0.25
+      position_limit: 12
+
+# Data Configuration
+data:
+  default_period: "1y"
+  update_frequency: 300  # seconds
+  cache_duration: 3600  # seconds
+  
+  periods:
+    - "1d"
+    - "5d"
+    - "1mo"
+    - "3mo"
+    - "6mo"
+    - "1y"
+    - "2y"
+    - "5y"
+  
+  intervals:
+    - "1m"
+    - "5m"
+    - "15m"
+    - "30m"
+    - "1h"
+    - "1d"
+    - "1wk"
+    - "1mo"
+
+# User Interface Configuration
+ui:
+  theme: "minimal"
+  color_scheme:
+    primary: "#000000"
+    secondary: "#6C757D"
+    background: "#FFFFFF"
+    surface: "#F8F9FA"
+    border: "#E9ECEF"
+    success: "#28A745"
+    danger: "#DC3545"
+    warning: "#FFC107"
+    info: "#17A2B8"
+  
+  layout:
+    sidebar_width: 300
+    main_container_width: 1200
+    chart_height: 500
+    table_rows_per_page: 10
+  
+  animations:
+    enabled: true
+    duration: 200  # milliseconds
+    easing: "ease-in-out"
+
+# Portfolio Configuration
+portfolio:
+  initial_capital: 100000
+  currency: "USD"
+  rebalance_frequency: "quarterly"
+  tax_rate: 0.15
+  transaction_cost: 0.001  # 0.1%
+
+# Backtesting Configuration
+backtesting:
+  start_date: "2022-01-01"
+  end_date: "2024-12-31"
+  initial_capital: 100000
+  commission: 0.001
+  slippage: 0.001
+  
+  metrics:
+    - "total_return"
+    - "annual_return"
+    - "sharpe_ratio"
+    - "max_drawdown"
+    - "win_rate"
+    - "profit_factor"
+
+# Notification Settings
+notifications:
+  email:
+    enabled: false
+    smtp_server: "smtp.gmail.com"
+    smtp_port: 587
+  
+  alerts:
+    price_change_threshold: 0.05  # 5%
+    volume_spike_threshold: 2.0   # 2x average
+    rsi_extreme_threshold: [20, 80]
+    
+# Database Configuration
+database:
+  type: "sqlite"
+  path: "data/stockbot.db"
+  
+  tables:
+    - "users"
+    - "portfolios"
+    - "transactions"
+    - "watchlists"
+    - "alerts"
+    - "predictions"
+
+# API Configuration
+api:
+  yfinance:
+    max_retries: 3
+    timeout: 30
+    rate_limit: 10  # requests per second
+  
+  news_api:
+    enabled: false
+    provider: "newsapi"
+    
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/stockbot.log"
+  max_size: "10MB"
+  backup_count: 5
+
+# Feature Flags
+features:
+  real_time_updates: true
+  advanced_charts: true
+  portfolio_optimization: true
+  news_sentiment: false
+  options_analysis: false
+  crypto_support: false
+  social_features: false
+  
+# Performance Settings
+performance:
+  enable_caching: true
+  cache_ttl: 300  # seconds
+  max_workers: 4
+  chunk_size: 100
+  lazy_loading: true

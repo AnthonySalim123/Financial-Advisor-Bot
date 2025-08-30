@@ -1,0 +1,80 @@
+# Streamlit Configuration - Minimalistic Theme
+# Black, White, and Gray Color Scheme
+
+[theme]
+# Primary color - Pure Black for interactive elements
+primaryColor = "#000000"
+
+# Background color - Pure White
+backgroundColor = "#FFFFFF"
+
+# Secondary background color - Light Gray for sections
+secondaryBackgroundColor = "#F8F9FA"
+
+# Text color - Dark Gray for readability
+textColor = "#212529"
+
+# Font - Clean, modern sans-serif
+font = "sans serif"
+
+[server]
+# Server settings
+port = 8501
+headless = true
+enableCORS = false
+enableXsrfProtection = true
+maxUploadSize = 200
+maxMessageSize = 200
+
+[browser]
+# Browser tab settings
+gatherUsageStats = false
+serverAddress = "localhost"
+serverPort = 8501
+
+[ui]
+# UI settings for minimal design
+hideTopBar = false
+hideSidebarNav = false
+
+[client]
+# Client-side settings
+showErrorDetails = false
+toolbarMode = "minimal"
+showSidebarNavigation = true
+
+[runner]
+# App runner settings
+magicEnabled = true
+installTracer = false
+fixMatplotlib = true
+postScriptGC = true
+fastReruns = true
+
+[global]
+# Development settings
+developmentMode = false
+showWarningOnDirectExecution = true
+logLevel = "info"
+unitTest = false
+suppressDeprecationWarnings = true
+showPyplotGlobalUse = false
+
+[deprecation]
+# Deprecation warnings
+showfileUploaderEncoding = false
+showImageFormat = false
+showPyplotGlobalUse = false
+
+[logger]
+# Logging configuration
+level = "info"
+messageFormat = "%(asctime)s %(message)s"
+
+# Custom CSS additions (will be added via app.py)
+# These maintain the minimalistic aesthetic:
+# - Clean borders
+# - Subtle shadows
+# - Consistent spacing
+# - Monospace for numbers
+# - Smooth transitions

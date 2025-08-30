@@ -1,0 +1,40 @@
+# Environment variables
+.env
+.env.local
+
+# Database
+data/
+*.db
+*.sqlite
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Temporary files
+*.tmp
+*.bak
+temp/
+
+# API Keys
+config/secrets.yaml
