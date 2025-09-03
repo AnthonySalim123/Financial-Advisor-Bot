@@ -448,17 +448,36 @@ def render_dashboard():
     st.markdown("## Market Overview")
     
     market_data = fetch_market_overview()
-    cols = st.columns(len(market_data))
-    
-    for i, (name, data) in enumerate(market_data.items()):
-        with cols[i]:
-            change_symbol = "↑" if data['change'] >= 0 else "↓"
-            change_color = "green" if data['change'] >= 0 else "red"
-            st.metric(
-                label=name,
-                value=f"${data['value']:,.2f}",
-                delta=f"{change_symbol} {abs(data['change']):.2f}%"
-            )
+    # Display market indices
+    if market_data and len(market_data) > 0:
+        cols = st.columns(len(market_data))
+        for i, (name, data) in enumerate(market_data.items()):
+            with cols[i]:
+                change_symbol = "↑" if data['change'] >= 0 else "↓"
+                change_color = "green" if data['change'] >= 0 else "red"
+                st.metric(
+                    label=name,
+                    value=f"${data['value']:,.2f}",
+                    delta=f"{change_symbol} {abs(data['change']):.2f}%"
+                )
+    else:
+        # Fallback display when no market data
+        st.info("Market data loading... Using synthetic data")
+        # Display sample market data
+        sample_data = {
+            'S&P 500': {'value': 4782.15, 'change': 0.85},
+            'NASDAQ': {'value': 15123.45, 'change': 1.23},
+            'DOW': {'value': 38456.78, 'change': 0.45},
+            'VIX': {'value': 18.65, 'change': -2.15}
+        }
+        cols = st.columns(len(sample_data))
+        for i, (name, data) in enumerate(sample_data.items()):
+            with cols[i]:
+                st.metric(
+                    label=name,
+                    value=f"${data['value']:,.2f}",
+                    delta=f"{data['change']:+.2f}%"
+                )
     
     # Tabs for different views
     st.markdown("---")
