@@ -15,7 +15,29 @@ from pathlib import Path
 import yfinance as yf
 import plotly.graph_objects as go
 import plotly.express as px
-from dotenv import load_dotenv
+from dotenv import load_dotenv# At the top of app.py, add:
+from utils.ollama_integration import OllamaExplainer
+from utils.user_evaluation import UserEvaluationSystem
+
+# In main():
+def main():
+    # ... existing code ...
+    
+    # Initialize evaluation system
+    evaluator = UserEvaluationSystem()
+    
+    # Initialize Ollama explainer
+    if 'explainer' not in st.session_state:
+        st.session_state.explainer = OllamaExplainer()
+    
+    # Add to sidebar
+    evaluator.render_feedback_form()
+    
+    # Show evaluation metrics (for demonstration)
+    if st.sidebar.button("📊 Show Evaluation Report"):
+        report = evaluator.generate_evaluation_report()
+        st.sidebar.success(f"Clarity Success: {report.get('clarity_success_rate', 0):.1f}%")
+        st.sidebar.success(f"Trust Success: {report.get('trust_success_rate', 0):.1f}%")
 
 # Load environment variables
 load_dotenv()
