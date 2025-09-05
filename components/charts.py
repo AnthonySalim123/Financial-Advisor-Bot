@@ -27,7 +27,7 @@ class ChartComponents:
         'volume': 'rgba(108, 117, 125, 0.3)'
     }
     
-    # Default layout configuration
+    # Default layout configuration - FIXED: Removed 'weight' properties
     DEFAULT_LAYOUT = {
         'plot_bgcolor': COLORS['background'],
         'paper_bgcolor': COLORS['background'],
@@ -123,12 +123,12 @@ class ChartComponents:
                         hoverlabel=dict(namelength=0)
                     ))
         
-        # Update layout
+        # Update layout - FIXED: Removed 'weight' from font
         layout = ChartComponents.DEFAULT_LAYOUT.copy()
         layout.update({
             'title': {
                 'text': title,
-                'font': {'size': 16, 'weight': 300}
+                'font': {'size': 16}  # Removed 'weight' property
             },
             'height': height,
             'xaxis': {
@@ -205,7 +205,7 @@ class ChartComponents:
         layout.update({
             'title': {
                 'text': title,
-                'font': {'size': 14, 'weight': 300}
+                'font': {'size': 14}  # Removed 'weight' property
             },
             'height': height,
             'showlegend': show_legend,
@@ -271,7 +271,7 @@ class ChartComponents:
         layout.update({
             'title': {
                 'text': title,
-                'font': {'size': 12, 'weight': 300}
+                'font': {'size': 12}  # Removed 'weight' property
             },
             'height': height,
             'showlegend': False
@@ -324,7 +324,7 @@ class ChartComponents:
         layout.update({
             'title': {
                 'text': title,
-                'font': {'size': 14, 'weight': 300}
+                'font': {'size': 14}  # Removed 'weight' property
             },
             'height': height,
             'xaxis': {
@@ -376,7 +376,7 @@ class ChartComponents:
         layout.update({
             'title': {
                 'text': title,
-                'font': {'size': 14, 'weight': 300}
+                'font': {'size': 14}  # Removed 'weight' property
             },
             'height': height,
             'showlegend': show_legend,
@@ -436,7 +436,7 @@ class ChartComponents:
         layout.update({
             'title': {
                 'text': title,
-                'font': {'size': 14, 'weight': 300}
+                'font': {'size': 14}  # Removed 'weight' property
             },
             'height': height,
             'showlegend': False,

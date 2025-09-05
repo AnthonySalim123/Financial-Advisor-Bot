@@ -19,6 +19,33 @@ from dotenv import load_dotenv# At the top of app.py, add:
 from utils.ollama_integration import OllamaExplainer
 from utils.user_evaluation import UserEvaluationSystem
 
+try:
+    from utils.ollama_integration import OllamaExplainer
+    OLLAMA_AVAILABLE = True
+except ImportError:
+    OLLAMA_AVAILABLE = False
+    print("Ollama integration not available")
+
+try:
+    from utils.user_evaluation import UserEvaluationSystem
+    EVALUATION_AVAILABLE = True
+except ImportError:
+    EVALUATION_AVAILABLE = False
+    print("User evaluation system not available")
+
+# Then in your main() function, conditionally use them:
+def main():
+    # ... existing code ...
+    
+    # Initialize evaluation system if available
+    if EVALUATION_AVAILABLE:
+        evaluator = UserEvaluationSystem()
+        evaluator.render_feedback_form()
+    
+    # Initialize Ollama explainer if available
+    if OLLAMA_AVAILABLE and 'explainer' not in st.session_state:
+        st.session_state.explainer = OllamaExplainer()
+
 # In main():
 def main():
     # ... existing code ...

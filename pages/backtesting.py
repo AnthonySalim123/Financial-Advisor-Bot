@@ -19,7 +19,6 @@ from utils.data_processor import get_data_processor
 from utils.technical_indicators import TechnicalIndicators
 from utils.ml_models import create_prediction_model
 from components.charts import ChartComponents, render_chart
-from components.metrics import MetricComponents
 from components.sidebar import render_complete_sidebar
 
 # Page configuration
@@ -576,36 +575,31 @@ def render_backtest_results():
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        MetricComponents.render_metric_card(
-            title="Total Return",
+        st.metric(
+            label="📈 TOTAL RETURN",
             value=f"{metrics.get('total_return', 0):.2f}%",
-            delta=metrics.get('total_return', 0),
-            icon="📈"
+            delta=f"{metrics.get('total_return', 0):.2f}%"
         )
     
     with col2:
-        MetricComponents.render_metric_card(
-            title="Sharpe Ratio",
+        st.metric(
+            label="⚖️ SHARPE RATIO",
             value=f"{metrics.get('sharpe_ratio', 0):.2f}",
-            subtitle="Risk-adjusted return",
-            icon="⚖️"
+            delta=None
         )
     
     with col3:
-        MetricComponents.render_metric_card(
-            title="Win Rate",
+        st.metric(
+            label="🎯 WIN RATE",
             value=f"{metrics.get('win_rate', 0):.1f}%",
-            subtitle=f"{metrics.get('num_trades', 0)} trades",
-            icon="🎯"
+            delta=f"{metrics.get('num_trades', 0)} trades"
         )
     
     with col4:
-        MetricComponents.render_metric_card(
-            title="Max Drawdown",
+        st.metric(
+            label="📉 MAX DRAWDOWN",
             value=f"{metrics.get('max_drawdown', 0):.1f}%",
-            delta=metrics.get('max_drawdown', 0),
-            delta_color="inverse",
-            icon="📉"
+            delta=f"{metrics.get('max_drawdown', 0):.1f}%"
         )
     
     # Additional metrics
