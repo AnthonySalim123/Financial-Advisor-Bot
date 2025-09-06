@@ -19,6 +19,7 @@ from utils.database import get_database
 from components.charts import ChartComponents, render_chart
 from components.metrics import MetricComponents
 from components.sidebar import render_complete_sidebar
+from utils.session_state import init_session_state
 
 # Page configuration
 st.set_page_config(
@@ -27,27 +28,7 @@ st.set_page_config(
     layout="wide"
 )
 
-def initialize_session_state():
-    """Initialize session state variables"""
-    if 'portfolio' not in st.session_state:
-        st.session_state.portfolio = {
-            'holdings': {
-                'AAPL': {'shares': 50, 'avg_price': 150.00},
-                'MSFT': {'shares': 30, 'avg_price': 350.00},
-                'GOOGL': {'shares': 20, 'avg_price': 135.00},
-                'NVDA': {'shares': 25, 'avg_price': 450.00}
-            },
-            'cash': 25000,
-            'total_value': 125000,
-            'daily_return': 1.5,
-            'total_return': 25.0
-        }
-    
-    if 'transactions' not in st.session_state:
-        st.session_state.transactions = []
-    
-    if 'user_id' not in st.session_state:
-        st.session_state.user_id = 1
+
 
 def calculate_portfolio_value():
     """Calculate current portfolio value"""
@@ -453,7 +434,7 @@ def render_rebalancing_suggestions():
 # Main function
 def main():
     # Initialize session state
-    initialize_session_state()
+    init_session_state()
     
     # Render sidebar
     if 'user_profile' in st.session_state:
