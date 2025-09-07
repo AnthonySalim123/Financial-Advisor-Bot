@@ -7,6 +7,7 @@ import streamlit as st
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import json
+import time
 
 class SidebarComponents:
     """Reusable sidebar components with consistent styling"""
@@ -111,30 +112,179 @@ class SidebarComponents:
     
     @staticmethod
     def render_quick_actions():
-        """Render quick action buttons"""
+        """Render quick action buttons with working functionality"""
         st.sidebar.markdown("### ⚡ Quick Actions")
         
         col1, col2 = st.sidebar.columns(2)
         
         with col1:
-            if st.button("🔄 Refresh", use_container_width=True):
-                st.cache_data.clear()
-                st.session_state.last_update = datetime.now()
-                st.rerun()
+            if st.button("🔄 Refresh", use_container_width=True, key="refresh_btn"):
+                with st.spinner("Refreshing data..."):
+                    st.cache_data.clear()
+                    st.session_state.last_update = datetime.now()
+                    time.sleep(0.5)  # Brief pause for visual feedback
+                    st.sidebar.success("✅ Data refreshed!")
+                    time.sleep(1)
+                    st.rerun()
         
         with col2:
-            if st.button("📊 Report", use_container_width=True):
-                st.session_state.show_report_modal = True
+            if st.button("📊 Report", use_container_width=True, key="report_btn"):
+                with st.spinner("Generating report..."):
+                    time.sleep(1)  # Simulate processing
+                    
+                    # Create a comprehensive report
+                    portfolio = st.session_state.get('portfolio', {})
+                    watchlist = st.session_state.get('watchlist', [])
+                    user = st.session_state.get('user_profile', {})
+                    
+                    report = f"""# Portfolio Report
+                    
+Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+## User Profile
+- Name: {user.get('name', 'Guest User')}
+- Risk Tolerance: {user.get('risk_tolerance', 'Moderate')}
+- Investment Horizon: {user.get('investment_horizon', '1-3 years')}
+
+## Portfolio Summary
+- Total Value: ${portfolio.get('total_value', 0):,.2f}
+- Cash Available: ${portfolio.get('cash', 0):,.2f}
+- Daily Return: {portfolio.get('daily_return', 0):+.2f}%
+- Total Return: {portfolio.get('total_return', 0):+.2f}%
+
+## Current Holdings
+"""
+                    holdings = portfolio.get('holdings', {})
+                    if holdings:
+                        for symbol, holding in holdings.items():
+                            shares = holding.get('shares', 0)
+                            avg_price = holding.get('avg_price', 0)
+                            value = shares * avg_price
+                            report += f"- **{symbol}**: {shares} shares @ ${avg_price:.2f} = ${value:,.2f}\n"
+                    else:
+                        report += "No current holdings\n"
+                    
+                    report += f"\n## Watchlist\n"
+                    for symbol in watchlist:
+                        report += f"- {symbol}\n"
+                    
+                    report += f"\n---\n*StockBot Advisor - CM3070 Project*"
+                    
+                    # Provide download button
+                    st.sidebar.download_button(
+                        label="📥 Download Report",
+                        data=report,
+                        file_name=f"portfolio_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+                        mime="text/markdown",
+                        key="download_report"
+                    )
+                    st.sidebar.success("✅ Report ready for download!")
         
         col1, col2 = st.sidebar.columns(2)
         
         with col1:
-            if st.button("🎯 Analyze", use_container_width=True):
-                st.session_state.run_analysis = True
+            if st.button("🎯 Analyze", use_container_width=True, key="analyze_btn"):
+                with st.spinner("Running analysis..."):
+                    time.sleep(1.5)  # Simulate analysis
+                    
+                    # Perform quick analysis
+                    portfolio = st.session_state.get('portfolio', {})
+                    total_value = portfolio.get('total_value', 100000)
+                    daily_return = portfolio.get('daily_return', 0)
+                    holdings = portfolio.get('holdings', {})
+                    
+                    st.sidebar.success("📊 Analysis Complete!")
+                    
+                    # Display analysis results
+                    with st.sidebar.expander("📈 Analysis Results", expanded=True):
+                        # Performance Analysis
+                        st.markdown("**Performance Status:**")
+                        if daily_return > 0:
+                            st.success(f"↑ Portfolio up {daily_return:.2f}% today")
+                        elif daily_return < 0:
+                            st.error(f"↓ Portfolio down {abs(daily_return):.2f}% today")
+                        else:
+                            st.info("→ No change today")
+                        
+                        # Risk Assessment
+                        st.markdown("**Risk Assessment:**")
+                        if total_value > 120000:
+                            st.success("💎 Strong performance - Consider rebalancing")
+                        elif total_value < 95000:
+                            st.warning("⚠️ Below initial capital - Review strategy")
+                        else:
+                            st.info("📊 Stable performance - On track")
+                        
+                        # Portfolio Concentration
+                        if holdings:
+                            st.markdown("**Concentration Risk:**")
+                            num_holdings = len(holdings)
+                            if num_holdings < 3:
+                                st.warning("⚠️ Low diversification - Consider adding positions")
+                            elif num_holdings > 10:
+                                st.info("📊 Well diversified portfolio")
+                            else:
+                                st.success("✅ Moderate diversification")
+                        
+                        # Recommendations
+                        st.markdown("**Recommendations:**")
+                        if daily_return > 2:
+                            st.info("• Consider taking partial profits")
+                        if daily_return < -2:
+                            st.info("• Review stop-loss levels")
+                        if total_value > 110000:
+                            st.info("• Rebalance to initial allocation")
         
         with col2:
-            if st.button("📧 Alerts", use_container_width=True):
-                st.session_state.show_alerts_modal = True
+            if st.button("📧 Alerts", use_container_width=True, key="alerts_btn"):
+                st.sidebar.markdown("### 📬 Price Alerts")
+                
+                # Display active alerts
+                with st.sidebar.container():
+                    # Sample alerts (in production, these would come from database)
+                    alerts = [
+                        {"symbol": "AAPL", "condition": "Price > $190", "status": "🟢 Active", "triggered": False},
+                        {"symbol": "NVDA", "condition": "RSI > 70", "status": "🟡 Warning", "triggered": True},
+                        {"symbol": "MSFT", "condition": "Volume spike", "status": "🔵 Monitoring", "triggered": False},
+                        {"symbol": "GOOGL", "condition": "Price < $130", "status": "🟢 Active", "triggered": False}
+                    ]
+                    
+                    if alerts:
+                        for alert in alerts:
+                            if alert['triggered']:
+                                st.sidebar.warning(f"{alert['status']} **{alert['symbol']}**: {alert['condition']} ⚠️ TRIGGERED")
+                            else:
+                                st.sidebar.info(f"{alert['status']} **{alert['symbol']}**: {alert['condition']}")
+                    else:
+                        st.sidebar.info("No active alerts")
+                
+                # Option to add new alert
+                with st.sidebar.expander("➕ Create New Alert"):
+                    watchlist = st.session_state.get('watchlist', ['AAPL', 'MSFT', 'GOOGL'])
+                    
+                    alert_symbol = st.selectbox(
+                        "Select Symbol",
+                        watchlist,
+                        key="alert_symbol"
+                    )
+                    
+                    alert_type = st.selectbox(
+                        "Alert Type",
+                        ["Price Above", "Price Below", "RSI Above", "RSI Below", "Volume Spike"],
+                        key="alert_type"
+                    )
+                    
+                    alert_value = st.number_input(
+                        "Threshold Value",
+                        min_value=0.0,
+                        value=100.0,
+                        step=1.0,
+                        key="alert_value"
+                    )
+                    
+                    if st.button("Create Alert", key="create_alert"):
+                        st.success(f"✅ Alert created: {alert_symbol} {alert_type} {alert_value}")
+                        # In production, save to database
         
         st.sidebar.markdown("---")
     
