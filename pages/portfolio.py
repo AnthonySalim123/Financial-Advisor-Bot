@@ -32,6 +32,7 @@ st.set_page_config(
 
 def calculate_portfolio_value():
     """Calculate current portfolio value"""
+    
     data_processor = get_data_processor()
     total_value = st.session_state.portfolio['cash']
     
@@ -87,60 +88,111 @@ def calculate_portfolio_value():
     return pd.DataFrame(holdings_data)
 
 def render_portfolio_summary():
-    """Render portfolio summary metrics"""
+    """Render portfolio overview metrics"""
     st.markdown("## Portfolio Overview")
     
     portfolio = st.session_state.portfolio
     
     # Calculate metrics
-    total_value = portfolio['total_value']
-    cash = portfolio['cash']
-    invested = total_value - cash
-    cash_percentage = (cash / total_value) * 100 if total_value > 0 else 0
+    total_value = portfolio.get('total_value', 125430)
+    invested = total_value - portfolio.get('cash', 25000)
+    cash = portfolio.get('cash', 25000)
+    total_return = portfolio.get('total_return', 25.4)
+    positions = len(portfolio.get('holdings', {}))
     
-    # Display metrics
     col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
-        MetricComponents.render_metric_card(
-            title="Total Value",
-            value=total_value,
-            delta=portfolio.get('daily_return', 0),
-            icon="💼"
-        )
+        # Calculate percentage change
+        daily_return = portfolio.get('daily_return', 1.9)
+        color = "#28A745" if daily_return >= 0 else "#DC3545"
+        arrow = "↑" if daily_return >= 0 else "↓"
+        
+        st.markdown(f"""
+        <div style="background: white; padding: 1rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                <span style="font-size: 1.2rem; margin-right: 0.5rem;">💼</span>
+                <span style="color: #6C757D; font-size: 0.75rem; text-transform: uppercase;">TOTAL VALUE</span>
+            </div>
+            <div style="font-size: 1.75rem; font-weight: bold; color: #000;">
+                ${total_value:,.0f}
+            </div>
+            <div style="color: {color}; font-size: 0.875rem; margin-top: 0.5rem;">
+                {arrow} {abs(daily_return):.2f}%
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
     with col2:
-        MetricComponents.render_metric_card(
-            title="Invested",
-            value=invested,
-            subtitle=f"{(invested/total_value)*100:.1f}% of total",
-            icon="📊"
-        )
+        invested_pct = (invested / (invested + cash)) * 100 if (invested + cash) > 0 else 0
+        
+        st.markdown(f"""
+        <div style="background: white; padding: 1rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                <span style="font-size: 1.2rem; margin-right: 0.5rem;">📊</span>
+                <span style="color: #6C757D; font-size: 0.75rem; text-transform: uppercase;">INVESTED</span>
+            </div>
+            <div style="font-size: 1.75rem; font-weight: bold; color: #000;">
+                ${invested:,.0f}
+            </div>
+            <div style="color: #6C757D; font-size: 0.875rem; margin-top: 0.5rem;">
+                {invested_pct:.1f}% of total
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
     with col3:
-        MetricComponents.render_metric_card(
-            title="Cash",
-            value=cash,
-            subtitle=f"{cash_percentage:.1f}% of total",
-            icon="💵"
-        )
+        cash_pct = (cash / total_value) * 100 if total_value > 0 else 0
+        
+        st.markdown(f"""
+        <div style="background: white; padding: 1rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                <span style="font-size: 1.2rem; margin-right: 0.5rem;">💵</span>
+                <span style="color: #6C757D; font-size: 0.75rem; text-transform: uppercase;">CASH</span>
+            </div>
+            <div style="font-size: 1.75rem; font-weight: bold; color: #000;">
+                ${cash:,.0f}
+            </div>
+            <div style="color: #6C757D; font-size: 0.875rem; margin-top: 0.5rem;">
+                {cash_pct:.1f}% of total
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
     with col4:
-        MetricComponents.render_metric_card(
-            title="Total Return",
-            value=f"{portfolio.get('total_return', 0):.1f}%",
-            delta=portfolio.get('total_return', 0),
-            icon="📈"
-        )
+        return_color = "#28A745" if total_return >= 0 else "#DC3545"
+        return_arrow = "↑" if total_return >= 0 else "↓"
+        
+        st.markdown(f"""
+        <div style="background: white; padding: 1rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                <span style="font-size: 1.2rem; margin-right: 0.5rem;">📈</span>
+                <span style="color: #6C757D; font-size: 0.75rem; text-transform: uppercase;">TOTAL RETURN</span>
+            </div>
+            <div style="font-size: 1.75rem; font-weight: bold; color: #000;">
+                {total_return:.1f}%
+            </div>
+            <div style="color: {return_color}; font-size: 0.875rem; margin-top: 0.5rem;">
+                {return_arrow} {abs(total_return):.2f}%
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
     with col5:
-        num_positions = len(portfolio.get('holdings', {}))
-        MetricComponents.render_metric_card(
-            title="Positions",
-            value=num_positions,
-            subtitle="Active holdings",
-            icon="🎯"
-        )
+        st.markdown(f"""
+        <div style="background: white; padding: 1rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                <span style="font-size: 1.2rem; margin-right: 0.5rem;">💼</span>
+                <span style="color: #6C757D; font-size: 0.75rem; text-transform: uppercase;">POSITIONS</span>
+            </div>
+            <div style="font-size: 1.75rem; font-weight: bold; color: #000;">
+                {positions}
+            </div>
+            <div style="color: #6C757D; font-size: 0.875rem; margin-top: 0.5rem;">
+                Active holdings
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
 def render_holdings_table():
     """Render holdings table"""

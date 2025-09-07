@@ -64,43 +64,123 @@ def initialize_session_state():
         }
 
 def render_market_overview():
-    """Render market overview section"""
+    """Render market overview section with real data"""
+    import yfinance as yf
+    from datetime import datetime, timedelta
+    
     st.markdown("## Market Overview")
     
-    # Get data processor
-    data_processor = get_data_processor()
+    # Define market indices tickers
+    market_tickers = {
+        "S&P 500": "^GSPC",
+        "DOW JONES": "^DJI",
+        "NASDAQ": "^IXIC",
+        "VIX": "^VIX",
+        "GOLD": "GC=F",
+        "10Y BOND": "^TNX",
+        "USD INDEX": "DX-Y.NYB",
+        "CRUDE OIL": "CL=F"
+    }
     
-    # Fetch market data
-    market_data = data_processor.get_market_overview()
+    indices = []
     
-    if not market_data.empty:
-        # Display market indices
-        cols = st.columns(len(market_data))
-        for i, row in market_data.iterrows():
-            with cols[min(i, len(cols)-1)]:
-                MetricComponents.render_metric_card(
-                    title=row['Index'],
-                    value=f"{row['Value']:,.2f}",
-                    delta=row['Change%'],
-                    delta_color='normal' if row['Change%'] >= 0 else 'inverse'
-                )
-    else:
-        # Fallback with sample data
-        indices = {
-            'S&P 500': {'value': 4782.15, 'change': 0.85},
-            'NASDAQ': {'value': 15123.45, 'change': 1.23},
-            'DOW': {'value': 38456.78, 'change': 0.45},
-            'VIX': {'value': 18.65, 'change': -2.15}
-        }
-        
-        cols = st.columns(len(indices))
-        for i, (name, data) in enumerate(indices.items()):
-            with cols[i]:
-                MetricComponents.render_metric_card(
-                    title=name,
-                    value=f"{data['value']:,.2f}",
-                    delta=data['change']
-                )
+    # Fetch real data for each ticker
+    for name, ticker in market_tickers.items():
+        try:
+            # Fetch data for last 2 days
+            data = yf.download(ticker, 
+                              start=(datetime.now() - timedelta(days=5)), 
+                              end=datetime.now(), 
+                              progress=False)
+            
+            if not data.empty and len(data) >= 2:
+                current_price = data['Close'].iloc[-1]
+                previous_price = data['Close'].iloc[-2]
+                change_pct = ((current_price - previous_price) / previous_price) * 100
+                
+                indices.append({
+                    "name": name,
+                    "value": current_price,
+                    "change": change_pct
+                })
+            else:
+                # Fallback to dummy data if fetch fails
+                indices.append({
+                    "name": name,
+                    "value": 0,
+                    "change": 0
+                })
+        except:
+            # Use dummy data if API fails
+            indices.append({
+                "name": name,
+                "value": 0,
+                "change": 0
+            })
+    
+    # If no data was fetched, use fallback data
+    if not indices or all(idx["value"] == 0 for idx in indices):
+        indices = [
+            {"name": "S&P 500", "value": 4542.45, "change": -0.35},
+            {"name": "DOW JONES", "value": 35322.21, "change": 0.52},
+            {"name": "NASDAQ", "value": 14777.84, "change": -0.78},
+            {"name": "VIX", "value": 17.80, "change": 2.15},
+            {"name": "GOLD", "value": 1835.70, "change": 0.95},
+            {"name": "10Y BOND", "value": 4.42, "change": -0.42},
+            {"name": "USD INDEX", "value": 93.58, "change": -0.18},
+            {"name": "CRUDE OIL", "value": 75.20, "change": 1.85}
+        ]
+    
+    # Create columns for display
+    cols = st.columns(len(indices))
+    
+    # Display each index
+    for i, index in enumerate(indices):
+        with cols[i]:
+            color = "#28A745" if index["change"] >= 0 else "#DC3545"
+            arrow = "↑" if index["change"] >= 0 else "↓"
+            
+            st.markdown(f"""
+            <div style="
+                background: white;
+                border: 1px solid #E9ECEF;
+                border-radius: 8px;
+                padding: 1rem;
+                text-align: center;
+                height: 120px;
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            ">
+                <div style="
+                    color: #6C757D;
+                    font-size: 0.75rem;
+                    font-weight: 600;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                ">
+                    {index["name"]}
+                </div>
+                <div style="
+                    font-size: 1.5rem;
+                    font-weight: bold;
+                    color: #000000;
+                    font-family: monospace;
+                ">
+                    {index["value"]:,.2f}
+                </div>
+                <div style="
+                    color: {color};
+                    font-size: 0.875rem;
+                    font-weight: 500;
+                ">
+                    {arrow} {abs(index["change"]):.2f}%
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    st.markdown("<br>", unsafe_allow_html=True)
 
 def render_portfolio_summary():
     """Render portfolio summary"""
@@ -111,45 +191,86 @@ def render_portfolio_summary():
     col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
-        MetricComponents.render_metric_card(
-            title="Total Value",
-            value=portfolio['total_value'],
-            delta=portfolio['daily_return'],
-            icon="💼"
-        )
+        # FIXED: Added 'f' before the triple quotes to make it an f-string
+        st.markdown(f"""
+        <div style="background: white; padding: 1rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                <span style="font-size: 1.5rem; margin-right: 0.5rem;">💼</span>
+                <span style="color: #6C757D; font-size: 0.875rem; text-transform: uppercase;">TOTAL VALUE</span>
+            </div>
+            <div style="font-size: 2rem; font-weight: bold; color: #000;">
+                ${portfolio['total_value']:,.1f}
+            </div>
+            <div style="color: {'#28A745' if portfolio.get('daily_return', 0) >= 0 else '#DC3545'}; font-size: 0.875rem; margin-top: 0.5rem;">
+                {'↑' if portfolio.get('daily_return', 0) >= 0 else '↓'} {abs(portfolio.get('daily_return', 0)):.2f}%
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
     with col2:
-        daily_pnl = portfolio['total_value'] * (portfolio['daily_return'] / 100)
-        MetricComponents.render_metric_card(
-            title="Daily P&L",
-            value=daily_pnl,
-            delta=portfolio['daily_return'],
-            icon="📊"
-        )
+        daily_pnl = portfolio['total_value'] * (portfolio.get('daily_return', 0) / 100)
+        st.markdown(f"""
+        <div style="background: white; padding: 1rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                <span style="font-size: 1.5rem; margin-right: 0.5rem;">📊</span>
+                <span style="color: #6C757D; font-size: 0.875rem; text-transform: uppercase;">DAILY P&L</span>
+            </div>
+            <div style="font-size: 2rem; font-weight: bold; color: #000;">
+                ${daily_pnl:,.1f}
+            </div>
+            <div style="color: {'#28A745' if daily_pnl >= 0 else '#DC3545'}; font-size: 0.875rem; margin-top: 0.5rem;">
+                {'↑' if daily_pnl >= 0 else '↓'} {abs(portfolio.get('daily_return', 0)):.2f}%
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
     with col3:
-        MetricComponents.render_metric_card(
-            title="Total Return",
-            value=f"{portfolio['total_return']:.1f}%",
-            delta=portfolio['total_return'],
-            icon="📈"
-        )
+        st.markdown(f"""
+        <div style="background: white; padding: 1rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                <span style="font-size: 1.5rem; margin-right: 0.5rem;">📈</span>
+                <span style="color: #6C757D; font-size: 0.875rem; text-transform: uppercase;">TOTAL RETURN</span>
+            </div>
+            <div style="font-size: 2rem; font-weight: bold; color: #000;">
+                {portfolio.get('total_return', 0):.1f}%
+            </div>
+            <div style="color: {'#28A745' if portfolio.get('total_return', 0) >= 0 else '#DC3545'}; font-size: 0.875rem; margin-top: 0.5rem;">
+                {'↑' if portfolio.get('total_return', 0) >= 0 else '↓'} +{abs(portfolio.get('total_return', 0)):.1f}%
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
     with col4:
-        MetricComponents.render_metric_card(
-            title="Win Rate",
-            value="68%",
-            subtitle="Last 30 days",
-            icon="🎯"
-        )
+        st.markdown(f"""
+        <div style="background: white; padding: 1rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                <span style="font-size: 1.5rem; margin-right: 0.5rem;">🎯</span>
+                <span style="color: #6C757D; font-size: 0.875rem; text-transform: uppercase;">WIN RATE</span>
+            </div>
+            <div style="font-size: 2rem; font-weight: bold; color: #000;">
+                68%
+            </div>
+            <div style="color: #6C757D; font-size: 0.75rem; margin-top: 0.5rem;">
+                Last 30 days
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
     with col5:
-        MetricComponents.render_metric_card(
-            title="Cash Available",
-            value=portfolio['cash'],
-            subtitle="Ready to invest",
-            icon="💵"
-        )
+        st.markdown(f"""
+        <div style="background: white; padding: 1rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                <span style="font-size: 1.5rem; margin-right: 0.5rem;">💵</span>
+                <span style="color: #6C757D; font-size: 0.875rem; text-transform: uppercase;">CASH AVAILABLE</span>
+            </div>
+            <div style="font-size: 2rem; font-weight: bold; color: #000;">
+                ${portfolio.get('cash', 0):,.1f}
+            </div>
+            <div style="color: #6C757D; font-size: 0.75rem; margin-top: 0.5rem;">
+                Ready to invest
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
 def render_watchlist():
     """Render watchlist section"""
