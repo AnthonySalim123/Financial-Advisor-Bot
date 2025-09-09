@@ -1,3 +1,4 @@
+# utils/data_processor.py
 """
 Data Processing Module
 Handles all data fetching, caching, and preprocessing for the StockBot Advisor
@@ -27,6 +28,15 @@ except:
     FALLBACK_AVAILABLE = False
     logger.warning("Fallback data module not available")
 
+# Add sentiment analyzer import
+try:
+    from utils.sentiment_analyzer import get_sentiment_analyzer
+    SENTIMENT_AVAILABLE = True
+    logger.info("Sentiment analyzer available")
+except:
+    SENTIMENT_AVAILABLE = False
+    logger.warning("Sentiment analyzer not available")
+
 class StockDataProcessor:
     """Main class for processing stock market data"""
     
@@ -35,6 +45,18 @@ class StockDataProcessor:
         self.config = self._load_config(config_path)
         self.cache = {}
         self.last_update = {}
+        self.sentiment_cache = {}
+        
+        # Initialize sentiment analyzer
+        if SENTIMENT_AVAILABLE:
+            try:
+                self.sentiment_analyzer = get_sentiment_analyzer()
+                logger.info("✅ Sentiment analyzer initialized")
+            except Exception as e:
+                logger.warning(f"Sentiment analyzer initialization failed: {e}")
+                self.sentiment_analyzer = None
+        else:
+            self.sentiment_analyzer = None
         
     def _load_config(self, config_path):
         """Load configuration from yaml file"""
@@ -132,6 +154,96 @@ class StockDataProcessor:
             else:
                 logger.error(f"No data available for {symbol} and fallback not available")
                 return pd.DataFrame()
+    
+    def fetch_stock_data_with_sentiment(self, symbol: str, period: str = '1y') -> pd.DataFrame:
+        """
+        Fetch stock data with sentiment features integrated
+        
+        Args:
+            symbol: Stock ticker symbol
+            period: Time period
+            
+        Returns:
+            DataFrame with OHLCV data and sentiment features
+        """
+        # Get base stock data
+        df = self.fetch_stock_data(symbol, period)
+        
+        if df.empty:
+            return df
+        
+        # Add sentiment features if available
+        if self.sentiment_analyzer:
+            try:
+                sentiment_features = self.sentiment_analyzer.get_sentiment_features(symbol)
+                
+                # Add sentiment features as constant columns (latest sentiment applied to all rows)
+                for feature, value in sentiment_features.items():
+                    df[f'sentiment_{feature}'] = value
+                
+                logger.info(f"Added sentiment features for {symbol}")
+                
+            except Exception as e:
+                logger.warning(f"Failed to add sentiment features for {symbol}: {e}")
+                # Add neutral sentiment features as fallback
+                neutral_features = {
+                    'sentiment_score': 0.0,
+                    'sentiment_confidence': 0.0,
+                    'news_sentiment': 0.0,
+                    'news_confidence': 0.0,
+                    'news_articles_count': 0,
+                    'market_sentiment': 0.0,
+                    'price_position': 0.5,
+                    'volume_trend': 0.0,
+                    'momentum_5d': 0.0,
+                    'momentum_20d': 0.0
+                }
+                
+                for feature, value in neutral_features.items():
+                    df[f'sentiment_{feature}'] = value
+        
+        return df
+    
+    def fetch_sentiment_analysis(self, symbol: str, use_cache: bool = True) -> Dict:
+        """
+        Fetch comprehensive sentiment analysis for a symbol
+        
+        Args:
+            symbol: Stock ticker symbol
+            use_cache: Whether to use cached results
+            
+        Returns:
+            Dictionary with sentiment analysis results
+        """
+        if not self.sentiment_analyzer:
+            return {'error': 'Sentiment analyzer not available'}
+        
+        try:
+            # Check cache
+            if use_cache and symbol in self.sentiment_cache:
+                cache_entry = self.sentiment_cache[symbol]
+                cache_time = datetime.fromisoformat(cache_entry['timestamp'])
+                
+                # Use cache if less than 30 minutes old
+                if datetime.now() - cache_time < timedelta(minutes=30):
+                    logger.info(f"Using cached sentiment for {symbol}")
+                    return cache_entry['data']
+            
+            # Get fresh sentiment analysis
+            sentiment_data = self.sentiment_analyzer.get_comprehensive_sentiment(symbol)
+            
+            # Cache the result
+            self.sentiment_cache[symbol] = {
+                'data': sentiment_data,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            logger.info(f"Fetched fresh sentiment analysis for {symbol}")
+            return sentiment_data
+            
+        except Exception as e:
+            logger.error(f"Sentiment analysis failed for {symbol}: {e}")
+            return {'error': str(e)}
     
     def fetch_stock_info(self, symbol: str) -> Dict:
         """
@@ -274,114 +386,41 @@ class StockDataProcessor:
                         'AAPL': 150, 'MSFT': 350, 'GOOGL': 140,
                         'NVDA': 450, 'AMZN': 170, 'META': 350,
                         'JPM': 150, 'BAC': 35, 'GS': 350,
-                        'JNJ': 160, 'PFE': 30, 'MRNA': 100
+                        'JNJ': 160, 'PFE': 45, 'UNH': 500
                     }
                     
                     base_price = base_prices.get(symbol, 100)
-                    current_price = base_price * (1 + np.random.uniform(-0.02, 0.02))
-                    prev_close = base_price
-                    change = current_price - prev_close
-                    change_pct = (change / prev_close) * 100
+                    change_pct = np.random.uniform(-3, 3)
+                    current_price = base_price * (1 + change_pct/100)
                     
                     quotes_data.append({
                         'Symbol': symbol,
                         'Price': current_price,
-                        'Change': change,
+                        'Change': current_price - base_price,
                         'Change%': change_pct,
-                        'Volume': int(50000000 * (1 + np.random.uniform(-0.5, 0.5))),
-                        'Prev_Close': prev_close,
-                        'Day_High': current_price * 1.01,
-                        'Day_Low': current_price * 0.99
+                        'Volume': np.random.randint(1000000, 10000000),
+                        'Prev_Close': base_price,
+                        'Day_High': current_price * 1.02,
+                        'Day_Low': current_price * 0.98
                     })
         
         return pd.DataFrame(quotes_data)
     
-    def calculate_returns(self, data: pd.DataFrame, periods: List[int] = [1, 5, 20, 60, 252]) -> pd.DataFrame:
+    def get_market_overview(self) -> Dict:
         """
-        Calculate returns for different periods
-        
-        Args:
-            data: DataFrame with price data
-            periods: List of periods for return calculation
+        Get market overview with major indices
         
         Returns:
-            DataFrame with returns
-        """
-        returns_df = pd.DataFrame(index=data.index)
-        
-        for period in periods:
-            returns_df[f'Return_{period}D'] = data['Close'].pct_change(period)
-        
-        # Add cumulative returns
-        returns_df['Cumulative_Return'] = (1 + data['Close'].pct_change()).cumprod() - 1
-        
-        return returns_df
-    
-    def calculate_risk_metrics(self, data: pd.DataFrame, risk_free_rate: float = 0.02) -> Dict:
-        """
-        Calculate risk metrics for the stock
-        
-        Args:
-            data: DataFrame with price data
-            risk_free_rate: Annual risk-free rate
-        
-        Returns:
-            Dictionary with risk metrics
-        """
-        daily_returns = data['Close'].pct_change().dropna()
-        
-        # Calculate metrics
-        metrics = {
-            'volatility_daily': daily_returns.std(),
-            'volatility_annual': daily_returns.std() * np.sqrt(252),
-            'sharpe_ratio': (daily_returns.mean() - risk_free_rate/252) / daily_returns.std() * np.sqrt(252),
-            'sortino_ratio': self._calculate_sortino_ratio(daily_returns, risk_free_rate),
-            'max_drawdown': self._calculate_max_drawdown(data['Close']),
-            'var_95': daily_returns.quantile(0.05),
-            'cvar_95': daily_returns[daily_returns <= daily_returns.quantile(0.05)].mean(),
-            'skewness': daily_returns.skew(),
-            'kurtosis': daily_returns.kurtosis()
-        }
-        
-        return metrics
-    
-    def _calculate_sortino_ratio(self, returns: pd.Series, risk_free_rate: float) -> float:
-        """Calculate Sortino ratio"""
-        downside_returns = returns[returns < 0]
-        downside_std = downside_returns.std()
-        
-        if downside_std == 0:
-            return 0
-        
-        excess_return = returns.mean() - risk_free_rate/252
-        return excess_return / downside_std * np.sqrt(252)
-    
-    def _calculate_max_drawdown(self, prices: pd.Series) -> float:
-        """Calculate maximum drawdown"""
-        cumulative = (1 + prices.pct_change()).cumprod()
-        running_max = cumulative.expanding().max()
-        drawdown = (cumulative - running_max) / running_max
-        return drawdown.min()
-    
-    def get_market_overview(self) -> pd.DataFrame:
-        """
-        Get overview of major market indices with fallback
-        
-        Returns:
-            DataFrame with market indices data
+            Dictionary with market data
         """
         indices = {
             '^GSPC': 'S&P 500',
             '^DJI': 'Dow Jones',
             '^IXIC': 'NASDAQ',
-            '^VIX': 'VIX',
-            'GLD': 'Gold',
-            'TLT': 'Bonds',
-            'DX-Y.NYB': 'US Dollar',
-            'CL=F': 'Crude Oil'
+            '^VIX': 'VIX'
         }
         
-        market_data = []
+        market_data = {}
         
         for symbol, name in indices.items():
             try:
@@ -390,139 +429,46 @@ class StockDataProcessor:
                 
                 if not hist.empty and len(hist) >= 2:
                     current = hist['Close'].iloc[-1]
-                    prev = hist['Close'].iloc[-2]
-                    change_pct = ((current - prev) / prev) * 100 if prev != 0 else 0
+                    previous = hist['Close'].iloc[-2]
+                    change = current - previous
+                    change_pct = (change / previous) * 100 if previous != 0 else 0
                     
-                    market_data.append({
-                        'Index': name,
-                        'Symbol': symbol,
-                        'Value': current,
-                        'Change%': change_pct
-                    })
-                    logger.info(f"Fetched {name} from yfinance")
-                else:
-                    raise ValueError("Empty data")
-                    
-            except Exception as e:
-                logger.warning(f"YFinance failed for {name}: {e}")
-                
-                # USE FALLBACK - Generate synthetic market data
-                if FALLBACK_AVAILABLE:
-                    logger.info(f"Using synthetic data for {name}")
-                    
-                    # Synthetic values for indices
-                    base_values = {
-                        'S&P 500': 4500,
-                        'Dow Jones': 35000,
-                        'NASDAQ': 15000,
-                        'VIX': 18,
-                        'Gold': 1800,
-                        'Bonds': 140,
-                        'US Dollar': 95,
-                        'Crude Oil': 75
+                    market_data[symbol] = {
+                        'name': name,
+                        'price': current,
+                        'change': change,
+                        'change_pct': change_pct
                     }
                     
-                    base_value = base_values.get(name, 100)
-                    current = base_value * (1 + np.random.uniform(-0.02, 0.02))
-                    change_pct = np.random.uniform(-2, 2)
-                    
-                    market_data.append({
-                        'Index': name,
-                        'Symbol': symbol,
-                        'Value': current,
-                        'Change%': change_pct
-                    })
-        
-        return pd.DataFrame(market_data)
-    
-    def get_sector_performance(self) -> pd.DataFrame:
-        """
-        Get sector performance data with fallback
-        
-        Returns:
-            DataFrame with sector performance
-        """
-        sector_etfs = {
-            'XLK': 'Technology',
-            'XLF': 'Financials',
-            'XLV': 'Healthcare',
-            'XLE': 'Energy',
-            'XLI': 'Industrials',
-            'XLY': 'Consumer Discretionary',
-            'XLP': 'Consumer Staples',
-            'XLB': 'Materials',
-            'XLRE': 'Real Estate',
-            'XLU': 'Utilities',
-            'XLC': 'Communication Services'
-        }
-        
-        sector_data = []
-        
-        for symbol, sector in sector_etfs.items():
-            try:
-                ticker = yf.Ticker(symbol)
-                hist = ticker.history(period='5d')
-                
-                if not hist.empty and len(hist) >= 2:
-                    current = hist['Close'].iloc[-1]
-                    week_ago = hist['Close'].iloc[0]
-                    change_pct = ((current - week_ago) / week_ago) * 100 if week_ago != 0 else 0
-                    
-                    sector_data.append({
-                        'Sector': sector,
-                        'ETF': symbol,
-                        'Weekly_Change%': change_pct
-                    })
-                    logger.info(f"Fetched {sector} from yfinance")
-                else:
-                    raise ValueError("Empty data")
-                    
             except Exception as e:
-                logger.warning(f"YFinance failed for {sector}: {e}")
-                
-                # USE FALLBACK
-                if FALLBACK_AVAILABLE:
-                    logger.info(f"Using synthetic data for {sector}")
-                    
-                    # Generate synthetic sector performance
-                    change_pct = np.random.uniform(-5, 5)
-                    
-                    sector_data.append({
-                        'Sector': sector,
-                        'ETF': symbol,
-                        'Weekly_Change%': change_pct
-                    })
+                logger.warning(f"Failed to fetch {symbol}: {e}")
+                # Fallback with synthetic data
+                market_data[symbol] = {
+                    'name': name,
+                    'price': 4500.0 if symbol == '^GSPC' else 35000.0 if symbol == '^DJI' else 14000.0 if symbol == '^IXIC' else 20.0,
+                    'change': np.random.uniform(-50, 50),
+                    'change_pct': np.random.uniform(-2, 2)
+                }
         
-        return pd.DataFrame(sector_data)
+        return market_data
     
-    def export_data(self, data: pd.DataFrame, filename: str, format: str = 'csv'):
-        """
-        Export data to file
-        
-        Args:
-            data: DataFrame to export
-            filename: Output filename
-            format: Export format (csv, excel, json)
-        """
-        try:
-            if format == 'csv':
-                data.to_csv(filename)
-            elif format == 'excel':
-                data.to_excel(filename, engine='openpyxl')
-            elif format == 'json':
-                data.to_json(filename, orient='records', date_format='iso')
-            else:
-                raise ValueError(f"Unsupported format: {format}")
-            
-            logger.info(f"Data exported to {filename}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error exporting data: {e}")
-            return False
+    def clear_cache(self):
+        """Clear all cached data"""
+        self.cache.clear()
+        self.last_update.clear()
+        self.sentiment_cache.clear()
+        logger.info("Cache cleared")
+
 
 # Singleton instance
-@st.cache_resource
-def get_data_processor():
-    """Get or create data processor instance"""
-    return StockDataProcessor()
+_data_processor_instance = None
+
+def get_data_processor() -> StockDataProcessor:
+    """Get singleton data processor instance"""
+    global _data_processor_instance
+    if _data_processor_instance is None:
+        _data_processor_instance = StockDataProcessor()
+    return _data_processor_instance
+
+# Print status on import
+logger.info("Data processor module loaded successfully")

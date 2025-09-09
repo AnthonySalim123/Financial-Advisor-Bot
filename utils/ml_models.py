@@ -1,3 +1,4 @@
+# utils/ml_models.py
 """
 Machine Learning Models Module - Enhanced Version 2.0
 Achieves 70%+ accuracy through ensemble methods and advanced feature engineering
@@ -25,102 +26,295 @@ from sklearn.metrics import (
 from sklearn.feature_selection import SelectKBest, f_classif, mutual_info_classif
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.utils.class_weight import compute_class_weight
-from imblearn.over_sampling import SMOTE
 import joblib
 from typing import Dict, Tuple, Optional, List, Union
 import logging
 import warnings
 warnings.filterwarnings('ignore')
 
-# Try importing XGBoost and LightGBM
+# Optional imports with graceful fallback
+try:
+    from imblearn.over_sampling import SMOTE
+    SMOTE_AVAILABLE = True
+except ImportError:
+    SMOTE_AVAILABLE = False
+    print("⚠️ SMOTE (imbalanced-learn) not available. Using class weights instead.")
+
 try:
     from xgboost import XGBClassifier, XGBRegressor
     XGBOOST_AVAILABLE = True
 except ImportError:
     XGBOOST_AVAILABLE = False
-    print("XGBoost not available. Install with: pip install xgboost")
+    print("ℹ️ XGBoost not available. Using sklearn models only.")
 
 try:
     from lightgbm import LGBMClassifier, LGBMRegressor
     LIGHTGBM_AVAILABLE = True
 except ImportError:
     LIGHTGBM_AVAILABLE = False
+    print("ℹ️ LightGBM not available. Using sklearn models only.")
+
+# SHAP imports
+try:
+    import shap
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+    SHAP_AVAILABLE = True
+except ImportError:
+    SHAP_AVAILABLE = False
+    print("ℹ️ SHAP not available. Install with: pip install shap")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class EnhancedStockPredictor:
+class XAIExplainer:
     """
-    Advanced ML model for stock prediction with 70%+ accuracy target
-    Implements ensemble methods, advanced features, and proper validation
+    SHAP-based explainability for financial ML models
     """
     
-    def __init__(self, model_type: str = 'classification', config: Dict = None):
+    def __init__(self, model, model_type='classification'):
         """
-        Initialize enhanced predictor with optimized configuration
+        Initialize SHAP explainer
+        
+        Args:
+            model: Trained sklearn model (RandomForest, XGBoost, etc.)
+            model_type: 'classification' or 'regression'
+        """
+        self.model = model
+        self.model_type = model_type
+        self.explainer = None
+        self.shap_values = None
+        self.feature_names = None
+        
+    def initialize_explainer(self, X_background: pd.DataFrame, max_evals=100):
+        """
+        Initialize SHAP explainer with background data
+        
+        Args:
+            X_background: Background dataset for SHAP explainer
+            max_evals: Maximum evaluations for explainer
+        """
+        if not SHAP_AVAILABLE:
+            logger.warning("SHAP not available - explainer disabled")
+            return
+        
+        try:
+            self.feature_names = X_background.columns.tolist()
+            
+            # Use TreeExplainer for tree-based models
+            if hasattr(self.model, 'feature_importances_'):
+                self.explainer = shap.TreeExplainer(self.model)
+                logger.info("Initialized TreeExplainer")
+            else:
+                # Use Explainer for other models
+                background_sample = shap.sample(X_background, min(100, len(X_background)))
+                self.explainer = shap.Explainer(self.model.predict, background_sample)
+                logger.info("Initialized general Explainer")
+                
+        except Exception as e:
+            logger.error(f"Failed to initialize explainer: {e}")
+            raise
+    
+    def explain_predictions(self, X: pd.DataFrame) -> Dict:
+        """
+        Generate SHAP explanations for predictions
+        
+        Args:
+            X: Input features to explain
+            
+        Returns:
+            Dictionary containing SHAP values and analysis
+        """
+        if not SHAP_AVAILABLE or self.explainer is None:
+            return {'error': 'SHAP explainer not available'}
+        
+        try:
+            # Calculate SHAP values
+            if hasattr(self.explainer, 'shap_values'):
+                # TreeExplainer
+                if self.model_type == 'classification':
+                    shap_values = self.explainer.shap_values(X)
+                    # For multi-class, take the values for each class
+                    if isinstance(shap_values, list):
+                        self.shap_values = shap_values
+                    else:
+                        self.shap_values = shap_values
+                else:
+                    self.shap_values = self.explainer.shap_values(X)
+            else:
+                # General Explainer
+                shap_values = self.explainer(X)
+                self.shap_values = shap_values.values
+            
+            # Calculate feature importance
+            if isinstance(self.shap_values, list):
+                # Multi-class: average absolute SHAP values across classes
+                importance_values = np.mean([np.abs(sv).mean(axis=0) for sv in self.shap_values], axis=0)
+            else:
+                importance_values = np.abs(self.shap_values).mean(axis=0)
+            
+            importance_df = pd.DataFrame({
+                'feature': self.feature_names,
+                'importance': importance_values
+            }).sort_values('importance', ascending=False)
+            
+            # Get model predictions
+            predictions = self.model.predict(X)
+            if hasattr(self.model, 'predict_proba'):
+                probabilities = self.model.predict_proba(X)
+            else:
+                probabilities = None
+            
+            return {
+                'shap_values': self.shap_values,
+                'feature_importance': importance_df,
+                'predictions': predictions,
+                'probabilities': probabilities,
+                'base_value': self.explainer.expected_value if hasattr(self.explainer, 'expected_value') else 0
+            }
+            
+        except Exception as e:
+            logger.error(f"SHAP explanation failed: {e}")
+            return {'error': str(e)}
+    
+    def create_waterfall_plot(self, X_single: pd.DataFrame, prediction_idx: int = 0) -> go.Figure:
+        """
+        Create SHAP waterfall plot for a single prediction
+        
+        Args:
+            X_single: Single row DataFrame
+            prediction_idx: Index of prediction to explain
+            
+        Returns:
+            Plotly figure
+        """
+        if not SHAP_AVAILABLE or self.shap_values is None:
+            return go.Figure()
+        
+        try:
+            # Get SHAP values for single prediction
+            if isinstance(self.shap_values, list):
+                # Multi-class: use the predicted class
+                pred_class = self.model.predict(X_single)[0]
+                class_idx = pred_class + 1  # Assuming classes are -1, 0, 1
+                if class_idx >= len(self.shap_values):
+                    class_idx = 0
+                shap_vals = self.shap_values[class_idx][prediction_idx]
+            else:
+                shap_vals = self.shap_values[prediction_idx]
+            
+            # Get base value
+            base_value = self.explainer.expected_value
+            if isinstance(base_value, (list, np.ndarray)):
+                base_value = base_value[0] if len(base_value) > 0 else 0
+            
+            # Create waterfall data
+            features = self.feature_names
+            values = shap_vals
+            
+            # Sort by absolute value for better visualization
+            sorted_indices = np.argsort(np.abs(values))[::-1][:15]  # Top 15 features
+            features_sorted = [features[i] for i in sorted_indices]
+            values_sorted = [values[i] for i in sorted_indices]
+            
+            # Create waterfall plot
+            fig = go.Figure()
+            
+            fig.add_trace(go.Waterfall(
+                name="SHAP Values",
+                orientation="v",
+                measure=["absolute"] + ["relative"] * len(values_sorted) + ["total"],
+                x=["Base"] + features_sorted + ["Final Prediction"],
+                textposition="outside",
+                text=[f"{base_value:.3f}"] + [f"{v:+.3f}" for v in values_sorted] + ["Final"],
+                y=[base_value] + values_sorted + [sum(values_sorted)],
+                connector={"line": {"color": "rgb(63, 63, 63)"}},
+                increasing={"marker": {"color": "green"}},
+                decreasing={"marker": {"color": "red"}},
+                totals={"marker": {"color": "blue"}}
+            ))
+            
+            fig.update_layout(
+                title=f"SHAP Waterfall Plot - Feature Contributions",
+                showlegend=False,
+                height=600,
+                xaxis_title="Features",
+                yaxis_title="SHAP Value",
+                xaxis={'tickangle': 45}
+            )
+            
+            return fig
+            
+        except Exception as e:
+            logger.error(f"Waterfall plot creation failed: {e}")
+            return go.Figure()
+
+
+class MLModel:
+    """
+    Advanced Machine Learning Model with Ensemble Methods
+    Designed for 70%+ accuracy on financial time series data
+    """
+    
+    def __init__(self, model_type='classification', config=None):
+        """
+        Initialize the ML model
         
         Args:
             model_type: 'classification' or 'regression'
-            config: Advanced configuration dictionary
+            config: Configuration dictionary
         """
         self.model_type = model_type
         self.models = {}
-        self.ensemble = None
-        self.scaler = RobustScaler()
+        self.final_model = None
+        self.scaler = None
         self.feature_selector = None
-        self.feature_importance = None
         self.selected_features = None
+        self.feature_importance = None
         self.is_trained = False
+        self.explainer = None
         
-        # Optimized configuration for 70%+ accuracy
-        self.config = config or {
+        # Default configuration with enhanced parameters
+        default_config = {
             # Model parameters
-            'use_ensemble': True,
-            'ensemble_voting': 'soft',
-            'calibrate_probabilities': True,
-            'handle_imbalance': True,
-            
-            # Random Forest
             'rf_n_estimators': 300,
             'rf_max_depth': 12,
             'rf_min_samples_split': 10,
             'rf_min_samples_leaf': 4,
             'rf_max_features': 'sqrt',
-            
-            # XGBoost
-            'xgb_n_estimators': 300,
-            'xgb_max_depth': 8,
-            'xgb_learning_rate': 0.01,
+            'gb_n_estimators': 200,
+            'gb_max_depth': 8,
+            'gb_learning_rate': 0.1,
+            'gb_subsample': 0.8,
+            'xgb_n_estimators': 250,
+            'xgb_max_depth': 6,
+            'xgb_learning_rate': 0.1,
             'xgb_subsample': 0.8,
             'xgb_colsample_bytree': 0.8,
             
-            # Gradient Boosting
-            'gb_n_estimators': 200,
-            'gb_max_depth': 6,
-            'gb_learning_rate': 0.01,
-            'gb_subsample': 0.8,
+            # Training parameters
+            'test_size': 0.2,
+            'random_state': 42,
+            'cv_folds': 5,
+            'handle_imbalance': True,
+            'use_ensemble': True,
+            'calibrate_probabilities': True,
             
             # Feature selection
             'feature_selection': True,
-            'n_features': 30,
+            'n_features': 50,
             'selection_method': 'mutual_info',
             
-            # Training parameters
-            'test_size': 0.2,
-            'validation_splits': 5,
-            'random_state': 42,
-            
-            # Signal generation
-            'lookback_period': 60,
-            'prediction_horizon': 5,
-            'buy_threshold': 0.015,  # 1.5% for better signals
-            'sell_threshold': -0.015,
-            
-            # Confidence thresholds
-            'min_confidence': 0.60,
-            'high_confidence': 0.75
+            # Prediction thresholds
+            'high_confidence': 0.7,
+            'prediction_horizon': 5
         }
+        
+        self.config = {**default_config, **(config or {})}
+        
+        # Initialize scalers and models
+        self.scaler = RobustScaler()
         
         # Initialize models
         self._initialize_models()
@@ -172,19 +366,6 @@ class EnhancedStockPredictor:
                     use_label_encoder=False,
                     eval_metric='mlogloss',
                     n_jobs=-1
-                )
-            
-            # LightGBM if available
-            if LIGHTGBM_AVAILABLE:
-                self.models['lgb'] = LGBMClassifier(
-                    n_estimators=250,
-                    max_depth=8,
-                    learning_rate=0.01,
-                    subsample=0.8,
-                    colsample_bytree=0.8,
-                    random_state=self.config['random_state'],
-                    n_jobs=-1,
-                    verbosity=-1
                 )
             
             # AdaBoost
@@ -243,209 +424,189 @@ class EnhancedStockPredictor:
         
         # === Volatility Features ===
         for period in [5, 10, 20]:
-            features[f'Volatility_{period}'] = features['Returns'].rolling(period).std() * np.sqrt(252)
-            features[f'ATR_{period}'] = self._calculate_atr(features, period)
-            features[f'Returns_Skew_{period}'] = features['Returns'].rolling(period).skew()
-            features[f'Returns_Kurt_{period}'] = features['Returns'].rolling(period).kurt()
+            features[f'Volatility_{period}'] = features['Returns'].rolling(period).std()
+            features[f'Volatility_Ratio_{period}'] = (
+                features[f'Volatility_{period}'] / features[f'Volatility_{period}'].rolling(50).mean()
+            )
+        
+        # === Momentum Features ===
+        for period in [5, 10, 15, 20]:
+            features[f'Momentum_{period}'] = features['Close'] / features['Close'].shift(period) - 1
+            features[f'ROC_{period}'] = features['Close'].pct_change(periods=period)
         
         # === Volume Features ===
-        features['Volume_Ratio'] = features['Volume'] / features['Volume'].rolling(20).mean()
-        features['Volume_Trend'] = features['Volume'].rolling(5).mean() / features['Volume'].rolling(20).mean()
-        features['Price_Volume_Trend'] = (features['Close'] * features['Volume']).rolling(10).sum()
-        features['OBV'] = (np.sign(features['Returns']) * features['Volume']).cumsum()
-        features['OBV_SMA'] = features['OBV'].rolling(20).mean()
+        if 'Volume' in features.columns:
+            features['Volume_Change'] = features['Volume'].pct_change()
+            features['Volume_MA_Ratio'] = features['Volume'] / features['Volume'].rolling(20).mean()
+            features['Price_Volume'] = features['Close'] * features['Volume']
+            
+            # On Balance Volume derivative
+            features['OBV_Change'] = features.get('OBV', pd.Series(0, index=features.index)).pct_change()
         
-        # === Technical Indicators ===
-        # RSI variations
-        for period in [7, 14, 21]:
-            features[f'RSI_{period}'] = self._calculate_rsi(features['Close'], period)
+        # === Technical Indicator Enhancements ===
+        if 'RSI' in features.columns:
+            features['RSI_Momentum'] = features['RSI'].diff()
+            features['RSI_MA'] = features['RSI'].rolling(10).mean()
+            features['RSI_Oversold'] = (features['RSI'] < 30).astype(int)
+            features['RSI_Overbought'] = (features['RSI'] > 70).astype(int)
         
-        # MACD variations
-        features['MACD'] = features['Close'].ewm(span=12).mean() - features['Close'].ewm(span=26).mean()
-        features['MACD_Signal'] = features['MACD'].ewm(span=9).mean()
-        features['MACD_Histogram'] = features['MACD'] - features['MACD_Signal']
-        features['MACD_Cross'] = np.where(features['MACD'] > features['MACD_Signal'], 1, -1)
+        if 'MACD' in features.columns and 'MACD_Signal' in features.columns:
+            features['MACD_Divergence'] = features['MACD'] - features['MACD_Signal']
+            features['MACD_Momentum'] = features['MACD'].diff()
+            features['MACD_Zero_Cross'] = ((features['MACD'] > 0) & (features['MACD'].shift(1) <= 0)).astype(int)
         
-        # Bollinger Bands
-        for period in [10, 20]:
-            bb_sma = features['Close'].rolling(period).mean()
-            bb_std = features['Close'].rolling(period).std()
-            features[f'BB_Upper_{period}'] = bb_sma + (2 * bb_std)
-            features[f'BB_Lower_{period}'] = bb_sma - (2 * bb_std)
-            features[f'BB_Width_{period}'] = (features[f'BB_Upper_{period}'] - features[f'BB_Lower_{period}']) / bb_sma
-            features[f'BB_Position_{period}'] = (features['Close'] - features[f'BB_Lower_{period}']) / \
-                                                (features[f'BB_Upper_{period}'] - features[f'BB_Lower_{period}'])
+        # === Market Regime Features ===
+        features['Trend_20'] = np.where(
+            features['Close'] > features.get('SMA_20', features['Close']), 1, -1
+        )
+        features['Trend_50'] = np.where(
+            features['Close'] > features.get('SMA_50', features['Close']), 1, -1
+        )
         
-        # Stochastic Oscillator
-        for period in [5, 14]:
-            low_min = features['Low'].rolling(period).min()
-            high_max = features['High'].rolling(period).max()
-            features[f'Stoch_K_{period}'] = 100 * (features['Close'] - low_min) / (high_max - low_min)
-            features[f'Stoch_D_{period}'] = features[f'Stoch_K_{period}'].rolling(3).mean()
+        # Market regime based on multiple timeframes
+        features['Market_Regime'] = (
+            features['Trend_20'] + features['Trend_50']
+        ) / 2
         
-        # === Pattern Recognition ===
-        features['Doji'] = self._detect_doji(features)
-        features['Hammer'] = self._detect_hammer(features)
-        features['Shooting_Star'] = self._detect_shooting_star(features)
-        features['Engulfing'] = self._detect_engulfing(features)
-        
-        # === Market Microstructure ===
-        features['Spread'] = features['High'] - features['Low']
-        features['Typical_Price'] = (features['High'] + features['Low'] + features['Close']) / 3
-        features['Weighted_Close'] = (features['High'] + features['Low'] + 2 * features['Close']) / 4
-        features['Price_Momentum'] = features['Close'] - features['Close'].shift(10)
-        
-        # === Lag Features ===
-        for lag in [1, 2, 3, 5, 10]:
-            features[f'Returns_Lag_{lag}'] = features['Returns'].shift(lag)
-            features[f'Volume_Lag_{lag}'] = features['Volume_Ratio'].shift(lag)
-        
-        # === Rolling Statistics ===
-        for period in [5, 10, 20]:
-            features[f'Returns_Mean_{period}'] = features['Returns'].rolling(period).mean()
-            features[f'Returns_Std_{period}'] = features['Returns'].rolling(period).std()
-            features[f'Returns_Min_{period}'] = features['Returns'].rolling(period).min()
-            features[f'Returns_Max_{period}'] = features['Returns'].rolling(period).max()
-        
-        # === Interaction Features ===
-        features['RSI_MACD_Interaction'] = features.get('RSI_14', 50) * features.get('MACD', 0)
-        features['Volume_Volatility_Interaction'] = features['Volume_Ratio'] * features.get('Volatility_20', 0)
-        features['Momentum_Volume'] = features['Price_Momentum'] * features['Volume_Ratio']
-        
-        # === Support and Resistance ===
-        features['Distance_from_High'] = (features['High'].rolling(20).max() - features['Close']) / features['Close']
-        features['Distance_from_Low'] = (features['Close'] - features['Low'].rolling(20).min()) / features['Close']
+        # === Support/Resistance Features ===
         features['Support_Level'] = features['Low'].rolling(20).min()
         features['Resistance_Level'] = features['High'].rolling(20).max()
+        features['Support_Distance'] = (features['Close'] - features['Support_Level']) / features['Close']
+        features['Resistance_Distance'] = (features['Resistance_Level'] - features['Close']) / features['Close']
+        
+        # === Lag Features ===
+        for lag in [1, 2, 3, 5]:
+            features[f'Close_Lag_{lag}'] = features['Close'].shift(lag)
+            features[f'Volume_Lag_{lag}'] = features['Volume'].shift(lag) if 'Volume' in features.columns else 0
+            features[f'Returns_Lag_{lag}'] = features['Returns'].shift(lag)
+        
+        # === Interaction Features ===
+        if 'RSI' in features.columns and 'MACD' in features.columns:
+            features['RSI_MACD_Interaction'] = features['RSI'] * features['MACD']
         
         # === Time-based Features ===
-        if 'Date' in features.columns or features.index.name == 'Date':
-            date_index = features.index if features.index.name == 'Date' else pd.to_datetime(features['Date'])
-            features['Day_of_Week'] = date_index.dayofweek
-            features['Day_of_Month'] = date_index.day
-            features['Month'] = date_index.month
-            features['Quarter'] = date_index.quarter
-        
-        # === Market Regime ===
-        features['Market_Regime'] = self._detect_market_regime(features)
-        features['Trend_Strength'] = self._calculate_trend_strength(features)
-        
-        # Fill NaN values with forward fill then backward fill
-        features = features.fillna(method='ffill').fillna(method='bfill')
+        if features.index.name == 'Date' or 'Date' in features.columns:
+            date_col = features.index if features.index.name == 'Date' else features['Date']
+            features['Day_of_Week'] = pd.to_datetime(date_col).dayofweek
+            features['Month'] = pd.to_datetime(date_col).month
+            features['Quarter'] = pd.to_datetime(date_col).quarter
         
         # Replace infinite values
-        features = features.replace([np.inf, -np.inf], np.nan).fillna(0)
+        features = features.replace([np.inf, -np.inf], np.nan)
         
-        logger.info(f"Created {len(features.columns)} features")
+        # Forward fill and then backward fill
+        features = features.fillna(method='ffill').fillna(method='bfill')
+        
+        # Final cleanup - drop any remaining NaN columns
+        features = features.dropna(axis=1, how='all')
+        
+        logger.info(f"Feature engineering complete: {len(features.columns)} features created")
         
         return features
     
-    def _calculate_rsi(self, prices: pd.Series, period: int = 14) -> pd.Series:
-        """Calculate RSI indicator"""
-        delta = prices.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-        rs = gain / (loss + 1e-10)
-        return 100 - (100 / (1 + rs))
-    
-    def _calculate_atr(self, df: pd.DataFrame, period: int = 14) -> pd.Series:
-        """Calculate Average True Range"""
-        high_low = df['High'] - df['Low']
-        high_close = np.abs(df['High'] - df['Close'].shift())
-        low_close = np.abs(df['Low'] - df['Close'].shift())
-        ranges = pd.concat([high_low, high_close, low_close], axis=1)
-        true_range = ranges.max(axis=1)
-        return true_range.rolling(period).mean()
-    
-    def _detect_doji(self, df: pd.DataFrame) -> pd.Series:
-        """Detect Doji candlestick pattern"""
-        body = np.abs(df['Close'] - df['Open'])
-        range_hl = df['High'] - df['Low']
-        return (body <= range_hl * 0.1).astype(int)
-    
-    def _detect_hammer(self, df: pd.DataFrame) -> pd.Series:
-        """Detect Hammer candlestick pattern"""
-        body = np.abs(df['Close'] - df['Open'])
-        lower_shadow = np.minimum(df['Open'], df['Close']) - df['Low']
-        upper_shadow = df['High'] - np.maximum(df['Open'], df['Close'])
-        return ((lower_shadow > 2 * body) & (upper_shadow < body * 0.3)).astype(int)
-    
-    def _detect_shooting_star(self, df: pd.DataFrame) -> pd.Series:
-        """Detect Shooting Star pattern"""
-        body = np.abs(df['Close'] - df['Open'])
-        lower_shadow = np.minimum(df['Open'], df['Close']) - df['Low']
-        upper_shadow = df['High'] - np.maximum(df['Open'], df['Close'])
-        return ((upper_shadow > 2 * body) & (lower_shadow < body * 0.3)).astype(int)
-    
-    def _detect_engulfing(self, df: pd.DataFrame) -> pd.Series:
-        """Detect Engulfing pattern"""
-        curr_body = df['Close'] - df['Open']
-        prev_body = curr_body.shift(1)
+    def engineer_features_with_sentiment(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Enhanced feature engineering including sentiment features
+        """
+        # Start with existing feature engineering
+        features = self.engineer_features(df)
         
-        bullish = (prev_body < 0) & (curr_body > 0) & (np.abs(curr_body) > np.abs(prev_body))
-        bearish = (prev_body > 0) & (curr_body < 0) & (np.abs(curr_body) > np.abs(prev_body))
+        # Add sentiment-based features if available
+        sentiment_columns = [col for col in df.columns if col.startswith('sentiment_')]
         
-        return bullish.astype(int) - bearish.astype(int)
-    
-    def _detect_market_regime(self, df: pd.DataFrame) -> pd.Series:
-        """Detect market regime (trending/ranging)"""
-        sma_20 = df['Close'].rolling(20).mean()
-        sma_50 = df['Close'].rolling(50).mean()
+        if sentiment_columns:
+            logger.info(f"Adding {len(sentiment_columns)} sentiment features")
+            
+            for col in sentiment_columns:
+                features[col] = df[col]
+            
+            # Create sentiment interaction features
+            if 'sentiment_sentiment_score' in features.columns:
+                sentiment_score = features['sentiment_sentiment_score']
+                
+                # Sentiment-momentum interactions
+                if 'Momentum_5' in features.columns:
+                    features['Sentiment_Momentum_5d'] = sentiment_score * features['Momentum_5']
+                
+                if 'Momentum_10' in features.columns:
+                    features['Sentiment_Momentum_10d'] = sentiment_score * features['Momentum_10']
+                
+                # Sentiment-RSI interactions
+                if 'RSI' in features.columns:
+                    features['Sentiment_RSI'] = sentiment_score * features['RSI']
+                
+                # Sentiment-Volume interactions
+                if 'Volume_Ratio' in features.columns:
+                    features['Sentiment_Volume'] = sentiment_score * features['Volume_Ratio']
+                
+                # Sentiment strength categories
+                features['Strong_Positive_Sentiment'] = (sentiment_score > 0.3).astype(int)
+                features['Strong_Negative_Sentiment'] = (sentiment_score < -0.3).astype(int)
+                features['Neutral_Sentiment'] = (np.abs(sentiment_score) <= 0.3).astype(int)
+            
+            # News-specific features
+            if 'sentiment_news_articles_count' in features.columns:
+                news_count = features['sentiment_news_articles_count']
+                features['High_News_Activity'] = (news_count > 5).astype(int)
+                features['Low_News_Activity'] = (news_count <= 2).astype(int)
+            
+            # Market sentiment features
+            if 'sentiment_price_position' in features.columns:
+                price_pos = features['sentiment_price_position']
+                features['High_Price_Position'] = (price_pos > 0.7).astype(int)
+                features['Low_Price_Position'] = (price_pos < 0.3).astype(int)
         
-        trend = pd.Series(index=df.index, data=0)
-        trend[df['Close'] > sma_20] += 1
-        trend[sma_20 > sma_50] += 1
-        trend[df['Close'] < sma_20] -= 1
-        trend[sma_20 < sma_50] -= 1
-        
-        return trend
-    
-    def _calculate_trend_strength(self, df: pd.DataFrame) -> pd.Series:
-        """Calculate trend strength using ADX concept"""
-        period = 14
-        high_diff = df['High'].diff()
-        low_diff = -df['Low'].diff()
-        
-        pos_dm = pd.Series(np.where((high_diff > low_diff) & (high_diff > 0), high_diff, 0), index=df.index)
-        neg_dm = pd.Series(np.where((low_diff > high_diff) & (low_diff > 0), low_diff, 0), index=df.index)
-        
-        atr = self._calculate_atr(df, period)
-        pos_di = 100 * (pos_dm.rolling(period).mean() / atr)
-        neg_di = 100 * (neg_dm.rolling(period).mean() / atr)
-        
-        dx = 100 * np.abs(pos_di - neg_di) / (pos_di + neg_di + 1e-10)
-        adx = dx.rolling(period).mean()
-        
-        return adx
+        logger.info(f"Feature engineering with sentiment complete: {len(features.columns)} total features")
+        return features
     
     def create_target_variable(self, df: pd.DataFrame) -> pd.Series:
         """
-        Create target variable with improved signal generation
+        Create target variable for prediction
         """
         if self.model_type == 'classification':
-            # Calculate future returns
-            future_returns = df['Close'].pct_change(
-                self.config['prediction_horizon']
-            ).shift(-self.config['prediction_horizon'])
+            # Create forward-looking signals
+            future_returns = df['Close'].pct_change(periods=self.config['prediction_horizon']).shift(-self.config['prediction_horizon'])
             
-            # Dynamic thresholds based on volatility
-            volatility = df['Returns'].rolling(20).std()
-            dynamic_buy_threshold = self.config['buy_threshold'] * (1 + volatility)
-            dynamic_sell_threshold = self.config['sell_threshold'] * (1 - volatility)
+            # Adaptive thresholds based on volatility
+            volatility = df['Close'].pct_change().rolling(20).std()
+            upper_threshold = volatility * 1.5
+            lower_threshold = volatility * -1.5
             
             # Create signals
-            target = pd.Series(index=df.index, data=0)
-            target[future_returns > dynamic_buy_threshold] = 1  # Buy
-            target[future_returns < dynamic_sell_threshold] = -1  # Sell
+            signals = pd.Series(0, index=df.index)
+            signals[future_returns > upper_threshold] = 1   # Buy
+            signals[future_returns < lower_threshold] = -1  # Sell
+            # Rest remain 0 (Hold)
             
-            return target
-        else:
-            # For regression
+            return signals
+        
+        else:  # Regression
+            # Predict future price
             return df['Close'].shift(-self.config['prediction_horizon'])
+    
+    def handle_class_imbalance(self, X, y):
+        """
+        Handle class imbalance using available methods
+        """
+        if not self.config['handle_imbalance'] or self.model_type != 'classification':
+            return X, y
+        
+        if SMOTE_AVAILABLE:
+            try:
+                smote = SMOTE(random_state=self.config['random_state'])
+                X_resampled, y_resampled = smote.fit_resample(X, y)
+                logger.info("Applied SMOTE for class balancing")
+                return X_resampled, y_resampled
+            except Exception as e:
+                logger.warning(f"SMOTE failed: {e}. Using class weights instead.")
+        
+        # Fallback: Use class weights (this is already set in model initialization)
+        logger.info("Using class weights for handling imbalance")
+        return X, y
     
     def select_features(self, X: pd.DataFrame, y: pd.Series) -> pd.DataFrame:
         """
-        Advanced feature selection using multiple methods
+        Intelligent feature selection for optimal performance
         """
         if not self.config['feature_selection']:
             return X
@@ -494,8 +655,15 @@ class EnhancedStockPredictor:
         Train the ensemble model with advanced techniques
         """
         try:
-            # Engineer features
-            features_df = self.engineer_features(df)
+            # Check if sentiment features are available and use appropriate feature engineering
+            has_sentiment = any(col.startswith('sentiment_') for col in df.columns)
+            
+            if has_sentiment:
+                features_df = self.engineer_features_with_sentiment(df)
+                logger.info("Using sentiment-enhanced feature engineering")
+            else:
+                features_df = self.engineer_features(df)
+                logger.info("Using standard feature engineering")
             
             # Create target variable
             y = self.create_target_variable(features_df)
@@ -528,9 +696,7 @@ class EnhancedStockPredictor:
             X_test_scaled = self.scaler.transform(X_test_selected)
             
             # Handle class imbalance
-            if self.config['handle_imbalance'] and self.model_type == 'classification':
-                smote = SMOTE(random_state=self.config['random_state'])
-                X_train_scaled, y_train = smote.fit_resample(X_train_scaled, y_train)
+            X_train_scaled, y_train = self.handle_class_imbalance(X_train_scaled, y_train)
             
             # Train individual models
             trained_models = []
@@ -574,61 +740,53 @@ class EnhancedStockPredictor:
             # Create ensemble
             if self.config['use_ensemble'] and len(trained_models) > 1:
                 # Weight models based on performance
-                weights = [score['test'] for _, score in model_scores.items()]
-                weights = np.array(weights) / sum(weights)
+                weights = []
+                estimators = []
                 
-                self.ensemble = VotingClassifier(
-                    estimators=trained_models,
-                    voting=self.config['ensemble_voting'],
-                    weights=weights
-                )
-                self.ensemble.fit(X_train_scaled, y_train)
+                for name, model in trained_models:
+                    test_score = model_scores[name]['test']
+                    if test_score > 0.4:  # Only include decent models
+                        weights.append(max(test_score, 0.1))
+                        estimators.append((name, model))
                 
-                # Calibrate probabilities
-                if self.config['calibrate_probabilities'] and self.model_type == 'classification':
-                    self.ensemble = CalibratedClassifierCV(
-                        self.ensemble, 
-                        cv=3,
-                        method='sigmoid'
+                if len(estimators) > 1:
+                    final_model = VotingClassifier(
+                        estimators=estimators,
+                        voting='soft' if self.model_type == 'classification' else 'hard'
                     )
-                    self.ensemble.fit(X_train_scaled, y_train)
-                
-                final_model = self.ensemble
+                    final_model.fit(X_train_scaled, y_train)
+                    logger.info("Created ensemble model")
+                else:
+                    final_model = trained_models[0][1]
+                    logger.info("Using single best model")
             else:
                 # Use best single model
-                best_model_name = max(model_scores.keys(), key=lambda k: model_scores[k]['test'])
-                final_model = self.models[best_model_name]
-                logger.info(f"Using {best_model_name} as final model")
+                best_model_name = max(model_scores.keys(), 
+                                    key=lambda x: model_scores[x]['test'])
+                final_model = dict(trained_models)[best_model_name]
+                logger.info(f"Using best single model: {best_model_name}")
             
-            # Make predictions
+            # Calibrate probabilities if classification
+            if (self.config['calibrate_probabilities'] and 
+                self.model_type == 'classification' and 
+                hasattr(final_model, 'predict_proba')):
+                
+                final_model = CalibratedClassifierCV(final_model, cv=3)
+                final_model.fit(X_train_scaled, y_train)
+                logger.info("Applied probability calibration")
+            
+            # Final evaluation
             y_pred = final_model.predict(X_test_scaled)
             
-            # Calculate comprehensive metrics
             if self.model_type == 'classification':
-                y_pred_proba = final_model.predict_proba(X_test_scaled)
-                
                 metrics = {
                     'accuracy': accuracy_score(y_test, y_pred),
                     'precision': precision_score(y_test, y_pred, average='weighted', zero_division=0),
                     'recall': recall_score(y_test, y_pred, average='weighted', zero_division=0),
-                    'f1_score': f1_score(y_test, y_pred, average='weighted', zero_division=0),
-                    'confusion_matrix': confusion_matrix(y_test, y_pred).tolist()
+                    'f1_score': f1_score(y_test, y_pred, average='weighted', zero_division=0)
                 }
                 
-                # Add ROC-AUC for binary/multiclass
-                if len(np.unique(y_test)) == 2:
-                    metrics['roc_auc'] = roc_auc_score(y_test, y_pred_proba[:, 1])
-                
-                # Cross-validation score
-                tscv = TimeSeriesSplit(n_splits=self.config['validation_splits'])
-                cv_scores = cross_val_score(
-                    final_model, X_train_scaled, y_train,
-                    cv=tscv, scoring='accuracy'
-                )
-                metrics['cv_mean'] = cv_scores.mean()
-                metrics['cv_std'] = cv_scores.std()
-                
-                # Per-class metrics
+                # Per-class accuracy
                 for i, class_label in enumerate(np.unique(y_test)):
                     class_mask = y_test == class_label
                     if class_mask.sum() > 0:
@@ -660,7 +818,8 @@ class EnhancedStockPredictor:
                 'train_samples': len(X_train),
                 'test_samples': len(X_test),
                 'n_features': len(self.selected_features),
-                'model_scores': model_scores
+                'model_scores': model_scores,
+                'has_sentiment_features': has_sentiment
             })
             
             self.is_trained = True
@@ -682,8 +841,13 @@ class EnhancedStockPredictor:
             raise ValueError("Model must be trained before prediction")
         
         try:
-            # Engineer features
-            features_df = self.engineer_features(df)
+            # Check if sentiment features are available and use appropriate feature engineering
+            has_sentiment = any(col.startswith('sentiment_') for col in df.columns)
+            
+            if has_sentiment:
+                features_df = self.engineer_features_with_sentiment(df)
+            else:
+                features_df = self.engineer_features(df)
             
             # Select features
             X = features_df[self.selected_features]
@@ -696,28 +860,20 @@ class EnhancedStockPredictor:
             
             if self.model_type == 'classification':
                 probabilities = self.final_model.predict_proba(X_scaled)
-                confidence = np.max(probabilities, axis=1)
+                confidence_scores = np.max(probabilities, axis=1)
             else:
-                # For regression, use prediction intervals
-                if hasattr(self.final_model, 'estimators_'):
-                    predictions_all = np.array([
-                        est.predict(X_scaled) 
-                        for est in self.final_model.estimators_
-                    ])
-                    confidence = 1 - (np.std(predictions_all, axis=0) / 
-                                    (np.mean(predictions_all, axis=0) + 1e-10))
-                else:
-                    confidence = np.ones(len(predictions)) * 0.5
+                # For regression, use prediction variance as confidence proxy
+                confidence_scores = np.ones(len(predictions)) * 0.5
             
-            return predictions, confidence
+            return predictions, confidence_scores
             
         except Exception as e:
             logger.error(f"Prediction failed: {e}")
             return np.array([]), np.array([])
     
-    def predict_next(self, df: pd.DataFrame) -> Dict:
+    def predict_latest(self, df: pd.DataFrame) -> Dict:
         """
-        Predict next signal with comprehensive analysis
+        Predict the latest data point with detailed analysis
         """
         if not self.is_trained:
             return {'error': 'Model not trained'}
@@ -726,35 +882,41 @@ class EnhancedStockPredictor:
             predictions, confidence = self.predict(df)
             
             if len(predictions) == 0:
-                return {'error': 'No valid prediction'}
+                return {'error': 'Prediction failed'}
             
             latest_pred = predictions[-1]
             latest_conf = confidence[-1]
-            
-            # Get latest data
             latest = df.iloc[-1]
             
-            # Generate comprehensive result
             if self.model_type == 'classification':
-                signal_map = {1: 'BUY', 0: 'HOLD', -1: 'SELL'}
+                signal_map = {-1: 'SELL', 0: 'HOLD', 1: 'BUY'}
+                
+                # Check if sentiment features are available
+                has_sentiment = any(col.startswith('sentiment_') for col in df.columns)
+                
+                if has_sentiment:
+                    features_df = self.engineer_features_with_sentiment(df)
+                else:
+                    features_df = self.engineer_features(df)
+                
+                probabilities = self.final_model.predict_proba(
+                    self.scaler.transform([features_df[self.selected_features].iloc[-1]])
+                )[0]
                 
                 result = {
-                    'signal': signal_map.get(int(latest_pred), 'HOLD'),
+                    'signal': signal_map.get(latest_pred, 'UNKNOWN'),
                     'confidence': float(latest_conf),
-                    'high_confidence': latest_conf >= self.config['high_confidence'],
-                    'prediction_raw': int(latest_pred),
+                    'probabilities': {
+                        signal_map[i-1]: float(prob) 
+                        for i, prob in enumerate(probabilities)
+                    },
                     
                     # Technical indicators
                     'indicators': {
-                        'RSI': float(latest.get('RSI_14', 50)),
-                        'MACD': float(latest.get('MACD', 0)),
-                        'MACD_Signal': float(latest.get('MACD_Signal', 0)),
-                        'BB_Position': float(latest.get('BB_Position_20', 0.5)),
-                        'Volume_Ratio': float(latest.get('Volume_Ratio', 1)),
-                        'Volatility': float(latest.get('Volatility_20', 0)),
-                        'ATR': float(latest.get('ATR_14', 0)),
-                        'SMA_20': float(latest.get('SMA_20', latest['Close'])),
-                        'SMA_50': float(latest.get('SMA_50', latest['Close']))
+                        'rsi': float(latest.get('RSI', 0)),
+                        'macd': float(latest.get('MACD', 0)),
+                        'sma_20': float(latest.get('SMA_20', 0)),
+                        'volatility': float(latest.get('Volatility_20', 0))
                     },
                     
                     # Price data
@@ -773,8 +935,20 @@ class EnhancedStockPredictor:
                     
                     # Feature importance
                     'feature_importance': self.feature_importance.head(10).to_dict('records') 
-                                        if self.feature_importance is not None else []
+                                        if self.feature_importance is not None else [],
+                    
+                    # Sentiment data if available
+                    'has_sentiment': has_sentiment
                 }
+                
+                # Add sentiment info if available
+                if has_sentiment:
+                    result['sentiment'] = {
+                        'overall_score': float(latest.get('sentiment_sentiment_score', 0)),
+                        'news_sentiment': float(latest.get('sentiment_news_sentiment', 0)),
+                        'market_sentiment': float(latest.get('sentiment_market_sentiment', 0)),
+                        'confidence': float(latest.get('sentiment_sentiment_confidence', 0))
+                    }
                 
             else:  # Regression
                 current_price = float(latest['Close'])
@@ -795,6 +969,79 @@ class EnhancedStockPredictor:
             
         except Exception as e:
             logger.error(f"Prediction failed: {e}")
+            return {'error': str(e)}
+    
+    def add_explainability(self, X_background: pd.DataFrame):
+        """
+        Add SHAP explainability to the trained model
+        
+        Args:
+            X_background: Background dataset for SHAP initialization
+        """
+        if not self.is_trained:
+            raise ValueError("Model must be trained before adding explainability")
+        
+        if not SHAP_AVAILABLE:
+            logger.warning("SHAP not available - explainability disabled")
+            return
+        
+        try:
+            self.explainer = XAIExplainer(self.final_model, self.model_type)
+            self.explainer.initialize_explainer(X_background)
+            
+            logger.info("SHAP explainability added successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to add explainability: {e}")
+            raise
+    
+    def explain_predictions(self, X: pd.DataFrame) -> Dict:
+        """
+        Generate SHAP explanations for predictions
+        
+        Args:
+            X: Input features to explain
+            
+        Returns:
+            Dictionary containing SHAP explanations
+        """
+        if not hasattr(self, 'explainer') or self.explainer is None:
+            return {'error': 'Explainer not initialized. SHAP may not be available.'}
+        
+        return self.explainer.explain_predictions(X)
+    
+    def create_shap_plots(self, X: pd.DataFrame, single_prediction_idx: int = 0) -> Dict:
+        """
+        Create SHAP visualization plots
+        
+        Args:
+            X: Input features
+            single_prediction_idx: Index for single prediction plots
+            
+        Returns:
+            Dictionary of Plotly figures
+        """
+        if not hasattr(self, 'explainer') or self.explainer is None:
+            return {'error': 'Explainer not initialized. SHAP may not be available.'}
+        
+        # First generate explanations
+        explanations = self.explainer.explain_predictions(X)
+        
+        if 'error' in explanations:
+            return {'error': explanations['error']}
+        
+        plots = {}
+        
+        try:
+            # Waterfall plot for single prediction
+            plots['waterfall'] = self.explainer.create_waterfall_plot(
+                X.iloc[[single_prediction_idx]], single_prediction_idx
+            )
+            
+            return plots
+            
+        except Exception as e:
+            logger.error(f"SHAP plot creation failed: {e}")
             return {'error': str(e)}
     
     def evaluate_performance(self, df: pd.DataFrame) -> Dict:
@@ -890,69 +1137,56 @@ class EnhancedStockPredictor:
         
         logger.info(f"Model loaded from {filepath}")
 
-# Backward compatibility wrapper
-class StockPredictionModel(EnhancedStockPredictor):
-    """Wrapper for backward compatibility"""
-    pass
 
-# Factory function
-def create_prediction_model(model_type: str = 'classification', 
-                          config: Dict = None) -> EnhancedStockPredictor:
+def create_prediction_model(model_type='classification', config=None):
     """
     Factory function to create prediction models
     
     Args:
         model_type: 'classification' or 'regression'
-        config: Model configuration
-    
+        config: Optional configuration dictionary
+        
     Returns:
-        EnhancedStockPredictor instance
+        MLModel instance
     """
-    return EnhancedStockPredictor(model_type, config)
+    return MLModel(model_type=model_type, config=config)
 
-# Utility function for quick testing
-def test_model_performance(symbol: str = 'AAPL', period: str = '2y') -> Dict:
-    """
-    Quick test of model performance
-    
-    Args:
-        symbol: Stock symbol
-        period: Data period
-    
-    Returns:
-        Performance metrics
-    """
-    try:
-        import yfinance as yf
-        from utils.technical_indicators import TechnicalIndicators
-        
-        # Fetch data
-        df = yf.download(symbol, period=period, progress=False)
-        
-        # Add technical indicators
-        df = TechnicalIndicators.calculate_all_indicators(df)
-        
-        # Create and train model
-        model = create_prediction_model('classification')
-        metrics = model.train(df, optimize_hyperparameters=False)
-        
-        return metrics
-        
-    except Exception as e:
-        logger.error(f"Test failed: {e}")
-        return {'error': str(e)}
 
-if __name__ == "__main__":
-    # Test the enhanced model
-    print("Testing Enhanced Stock Predictor...")
-    results = test_model_performance('AAPL', '2y')
+def get_model_info():
+    """Get information about available models and features"""
+    info = {
+        'available_models': ['RandomForest', 'GradientBoosting', 'ExtraTrees', 'AdaBoost'],
+        'optional_models': [],
+        'features': {
+            'class_imbalance_handling': 'class_weights' if not SMOTE_AVAILABLE else 'SMOTE',
+            'feature_engineering': 'advanced_60+_features',
+            'ensemble_methods': 'voting_classifier',
+            'probability_calibration': 'available',
+            'explainability': 'SHAP' if SHAP_AVAILABLE else 'feature_importance_only',
+            'sentiment_analysis': 'integrated'
+        }
+    }
     
-    if 'error' not in results:
-        print(f"\n✅ Model Performance:")
-        print(f"Accuracy: {results.get('accuracy', 0)*100:.1f}%")
-        print(f"Precision: {results.get('precision', 0)*100:.1f}%")
-        print(f"Recall: {results.get('recall', 0)*100:.1f}%")
-        print(f"F1 Score: {results.get('f1_score', 0)*100:.1f}%")
-        print(f"CV Mean: {results.get('cv_mean', 0)*100:.1f}% ± {results.get('cv_std', 0)*100:.1f}%")
-    else:
-        print(f"❌ Error: {results['error']}")
+    if XGBOOST_AVAILABLE:
+        info['available_models'].append('XGBoost')
+        info['optional_models'].append('XGBoost')
+    
+    if LIGHTGBM_AVAILABLE:
+        info['available_models'].append('LightGBM')
+        info['optional_models'].append('LightGBM')
+    
+    if SMOTE_AVAILABLE:
+        info['optional_models'].append('SMOTE')
+    
+    if SHAP_AVAILABLE:
+        info['optional_models'].append('SHAP')
+    
+    return info
+
+
+# Print status on import
+logger.info("ML Models module loaded successfully")
+model_info = get_model_info()
+logger.info(f"Available models: {model_info['available_models']}")
+if model_info['optional_models']:
+    logger.info(f"Optional models available: {model_info['optional_models']}")
