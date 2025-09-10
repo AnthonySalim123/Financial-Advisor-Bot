@@ -7,9 +7,6 @@ Detailed stock analysis with ML predictions, technical indicators, and sentiment
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
-import plotly.express as px
-from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import sys
@@ -17,6 +14,17 @@ import os
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Plotly imports with error handling
+try:
+    import plotly.graph_objects as go
+    import plotly.express as px
+    from plotly.subplots import make_subplots
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    st.error("Plotly is required for this page. Please install with: pip install plotly")
+    PLOTLY_AVAILABLE = False
+    st.stop()
 
 # Import custom modules
 from utils.data_processor import get_data_processor
@@ -232,6 +240,10 @@ def render_stock_overview(info: Dict, latest_data: pd.Series):
 
 def render_price_chart(df: pd.DataFrame, symbol: str):
     """Render interactive price chart with technical indicators"""
+    if not PLOTLY_AVAILABLE:
+        st.error("Plotly is required for charts")
+        return
+    
     st.markdown("### 📈 Price Chart & Technical Indicators")
     
     # Create subplots
@@ -398,13 +410,6 @@ def render_sentiment_analysis(symbol: str, sentiment_data: Dict):
             overall_label = sentiment_data.get('overall_sentiment_label', 'neutral')
             confidence = sentiment_data.get('overall_confidence', 0)
             
-            # Color based on sentiment
-            delta_color = "normal"
-            if overall_score > 0.2:
-                delta_color = "normal"
-            elif overall_score < -0.2:
-                delta_color = "inverse"
-            
             st.metric(
                 label="Overall Sentiment",
                 value=overall_label.title(),
@@ -433,7 +438,7 @@ def render_sentiment_analysis(symbol: str, sentiment_data: Dict):
             )
         
         # Sentiment breakdown
-        if news_sentiment.get('articles'):
+        if news_sentiment.get('articles') and PLOTLY_AVAILABLE:
             col1, col2 = st.columns([1, 2])
             
             with col1:
@@ -531,14 +536,14 @@ def render_ml_prediction(df: pd.DataFrame, symbol: str, include_sentiment: bool 
             
             if 'error' in metrics:
                 st.error(f"Model training failed: {metrics['error']}")
-                return
+                return None, None  # Return None tuple explicitly
             
             # Get prediction
             prediction_result = model.predict_latest(df)
             
             if 'error' in prediction_result:
                 st.error(f"Prediction failed: {prediction_result['error']}")
-                return
+                return None, None  # Return None tuple explicitly
             
             # Display main prediction
             col1, col2, col3 = st.columns([1, 1, 2])
@@ -600,7 +605,7 @@ def render_ml_prediction(df: pd.DataFrame, symbol: str, include_sentiment: bool 
             
             # Feature importance
             feature_importance = prediction_result.get('feature_importance', [])
-            if feature_importance:
+            if feature_importance and PLOTLY_AVAILABLE:
                 st.markdown("#### Top Contributing Features")
                 
                 # Create feature importance chart
@@ -640,7 +645,7 @@ def render_ml_prediction(df: pd.DataFrame, symbol: str, include_sentiment: bool 
             
         except Exception as e:
             st.error(f"ML analysis failed: {e}")
-            return None, None
+            return None, None  # Return None tuple explicitly
 
 def render_shap_analysis(model, df: pd.DataFrame, symbol: str):
     """Render SHAP explainability analysis"""
@@ -706,7 +711,8 @@ def render_shap_analysis(model, df: pd.DataFrame, symbol: str):
                 if 'error' not in explanations:
                     # Show prediction info
                     prediction = explanations['predictions'][0]
-                    signal_map = {-1: "SELL", 0: "HOLD", 1: "BUY"}
+                    # Updated signal mapping for [0, 1, 2] classes
+                    signal_map = {0: "SELL", 1: "HOLD", 2: "BUY"}
                     
                     col1, col2, col3 = st.columns(3)
                     with col1:
@@ -717,14 +723,14 @@ def render_shap_analysis(model, df: pd.DataFrame, symbol: str):
                         with col2:
                             st.metric("Confidence", f"{max(probs):.1%}")
                         with col3:
-                            prob_dict = {signal_map[i-1]: prob for i, prob in enumerate(probs)}
+                            prob_dict = {signal_map[i]: prob for i, prob in enumerate(probs)}
                             st.write("**Probabilities:**")
                             for signal, prob in prob_dict.items():
                                 st.write(f"{signal}: {prob:.1%}")
                     
                     # Feature importance from SHAP
                     shap_importance = explanations.get('feature_importance')
-                    if shap_importance is not None and not shap_importance.empty:
+                    if shap_importance is not None and not shap_importance.empty and PLOTLY_AVAILABLE:
                         st.markdown("#### SHAP Feature Importance")
                         
                         # Top 15 features
@@ -752,7 +758,7 @@ def render_shap_analysis(model, df: pd.DataFrame, symbol: str):
                 
                 if 'error' not in plots:
                     # Waterfall plot
-                    if 'waterfall' in plots:
+                    if 'waterfall' in plots and PLOTLY_AVAILABLE:
                         st.markdown("#### SHAP Waterfall Plot")
                         st.plotly_chart(plots['waterfall'], use_container_width=True)
                     
@@ -837,6 +843,11 @@ def main():
     st.title("🔍 Stock Analysis")
     st.markdown("Advanced technical analysis with AI predictions and sentiment insights")
     
+    # Check if plotly is available
+    if not PLOTLY_AVAILABLE:
+        st.error("This page requires Plotly. Please install it with: pip install plotly")
+        st.stop()
+    
     # Initialize session state
     initialize_session_state()
     
@@ -866,11 +877,18 @@ def main():
         render_technical_summary(df)
     
     with tab2:
-        model, prediction_result = render_ml_prediction(df, selected_symbol, include_sentiment)
+        # Handle the None return case properly
+        ml_result = render_ml_prediction(df, selected_symbol, include_sentiment)
         
-        if show_advanced and model is not None:
-            st.divider()
-            render_shap_analysis(model, df, selected_symbol)
+        # Check if we got valid results
+        if ml_result is not None and ml_result[0] is not None:
+            model, prediction_result = ml_result
+            
+            if show_advanced and model is not None:
+                st.divider()
+                render_shap_analysis(model, df, selected_symbol)
+        else:
+            st.warning("ML prediction is not available. Please check the data and try again.")
     
     with tab3:
         if include_sentiment and sentiment_data:

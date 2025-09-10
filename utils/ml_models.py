@@ -1,4 +1,4 @@
-# utils/ml_models.py
+# utils/ml_models.py (Complete corrected version)
 """
 Machine Learning Models Module - Enhanced Version 2.0
 Achieves 70%+ accuracy through ensemble methods and advanced feature engineering
@@ -27,10 +27,24 @@ from sklearn.feature_selection import SelectKBest, f_classif, mutual_info_classi
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.utils.class_weight import compute_class_weight
 import joblib
-from typing import Dict, Tuple, Optional, List, Union
+from typing import Dict, Tuple, Optional, List, Union, Any
 import logging
 import warnings
 warnings.filterwarnings('ignore')
+
+# Plotly imports (separate from optional imports)
+try:
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+    print("⚠️ Plotly not available. Install with: pip install plotly")
+    # Create dummy class for type hints
+    class go:
+        class Figure:
+            def __init__(self):
+                pass
 
 # Optional imports with graceful fallback
 try:
@@ -57,8 +71,6 @@ except ImportError:
 # SHAP imports
 try:
     import shap
-    import plotly.graph_objects as go
-    from plotly.subplots import make_subplots
     SHAP_AVAILABLE = True
 except ImportError:
     SHAP_AVAILABLE = False
@@ -178,7 +190,7 @@ class XAIExplainer:
             logger.error(f"SHAP explanation failed: {e}")
             return {'error': str(e)}
     
-    def create_waterfall_plot(self, X_single: pd.DataFrame, prediction_idx: int = 0) -> go.Figure:
+    def create_waterfall_plot(self, X_single: pd.DataFrame, prediction_idx: int = 0) -> Any:
         """
         Create SHAP waterfall plot for a single prediction
         
@@ -187,8 +199,12 @@ class XAIExplainer:
             prediction_idx: Index of prediction to explain
             
         Returns:
-            Plotly figure
+            Plotly figure or empty figure if libraries not available
         """
+        if not PLOTLY_AVAILABLE:
+            logger.warning("Plotly not available - cannot create waterfall plot")
+            return go.Figure()
+        
         if not SHAP_AVAILABLE or self.shap_values is None:
             return go.Figure()
         
@@ -197,7 +213,8 @@ class XAIExplainer:
             if isinstance(self.shap_values, list):
                 # Multi-class: use the predicted class
                 pred_class = self.model.predict(X_single)[0]
-                class_idx = pred_class + 1  # Assuming classes are -1, 0, 1
+                # Updated class indexing for [0, 1, 2] instead of [-1, 0, 1]
+                class_idx = pred_class  # No need to add 1 since classes are now [0, 1, 2]
                 if class_idx >= len(self.shap_values):
                     class_idx = 0
                 shap_vals = self.shap_values[class_idx][prediction_idx]
@@ -572,11 +589,11 @@ class MLModel:
             upper_threshold = volatility * 1.5
             lower_threshold = volatility * -1.5
             
-            # Create signals
-            signals = pd.Series(0, index=df.index)
-            signals[future_returns > upper_threshold] = 1   # Buy
-            signals[future_returns < lower_threshold] = -1  # Sell
-            # Rest remain 0 (Hold)
+            # Create signals using [0, 1, 2] instead of [-1, 0, 1] for sklearn compatibility
+            signals = pd.Series(1, index=df.index)  # Default to HOLD (1)
+            signals[future_returns > upper_threshold] = 2   # Buy (2)
+            signals[future_returns < lower_threshold] = 0   # Sell (0)
+            # Rest remain 1 (Hold)
             
             return signals
         
@@ -786,11 +803,12 @@ class MLModel:
                     'f1_score': f1_score(y_test, y_pred, average='weighted', zero_division=0)
                 }
                 
-                # Per-class accuracy
-                for i, class_label in enumerate(np.unique(y_test)):
+                # Per-class accuracy - updated for [0, 1, 2] classes
+                for class_label in [0, 1, 2]:  # Updated from [-1, 0, 1] to [0, 1, 2]
                     class_mask = y_test == class_label
                     if class_mask.sum() > 0:
-                        metrics[f'class_{class_label}_accuracy'] = (y_pred[class_mask] == class_label).mean()
+                        class_names = {0: 'SELL', 1: 'HOLD', 2: 'BUY'}
+                        metrics[f'class_{class_names[class_label]}_accuracy'] = (y_pred[class_mask] == class_label).mean()
                 
             else:
                 metrics = {
@@ -889,7 +907,8 @@ class MLModel:
             latest = df.iloc[-1]
             
             if self.model_type == 'classification':
-                signal_map = {-1: 'SELL', 0: 'HOLD', 1: 'BUY'}
+                # Updated signal mapping for [0, 1, 2] classes
+                signal_map = {0: 'SELL', 1: 'HOLD', 2: 'BUY'}
                 
                 # Check if sentiment features are available
                 has_sentiment = any(col.startswith('sentiment_') for col in df.columns)
@@ -907,7 +926,7 @@ class MLModel:
                     'signal': signal_map.get(latest_pred, 'UNKNOWN'),
                     'confidence': float(latest_conf),
                     'probabilities': {
-                        signal_map[i-1]: float(prob) 
+                        signal_map[i]: float(prob) 
                         for i, prob in enumerate(probabilities)
                     },
                     
@@ -1075,13 +1094,14 @@ class MLModel:
                     predictions[high_conf_mask]
                 ) if high_conf_mask.sum() > 0 else 0
                 
-                # Per-class accuracy
+                # Per-class accuracy - updated for [0, 1, 2] classes
                 class_accuracies = {}
-                for class_label in [-1, 0, 1]:
+                for class_label in [0, 1, 2]:  # Updated from [-1, 0, 1] to [0, 1, 2]
                     class_mask = actual == class_label
                     if class_mask.sum() > 0:
                         class_acc = (predictions[class_mask] == class_label).mean()
-                        class_accuracies[f'class_{class_label}'] = class_acc
+                        class_names = {0: 'SELL', 1: 'HOLD', 2: 'BUY'}
+                        class_accuracies[f'class_{class_names[class_label]}'] = class_acc
                 
                 return {
                     'overall_accuracy': accuracy,
@@ -1163,7 +1183,8 @@ def get_model_info():
             'ensemble_methods': 'voting_classifier',
             'probability_calibration': 'available',
             'explainability': 'SHAP' if SHAP_AVAILABLE else 'feature_importance_only',
-            'sentiment_analysis': 'integrated'
+            'sentiment_analysis': 'integrated',
+            'visualization': 'plotly' if PLOTLY_AVAILABLE else 'basic'
         }
     }
     
@@ -1180,6 +1201,9 @@ def get_model_info():
     
     if SHAP_AVAILABLE:
         info['optional_models'].append('SHAP')
+    
+    if PLOTLY_AVAILABLE:
+        info['optional_models'].append('Plotly')
     
     return info
 

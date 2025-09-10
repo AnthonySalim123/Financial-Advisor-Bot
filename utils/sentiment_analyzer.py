@@ -15,6 +15,148 @@ import re
 from collections import Counter
 import json
 
+import streamlit as st
+from datetime import datetime
+
+def initialize_session_state():
+    """Initialize all session state variables for the application"""
+    
+    # User Profile
+    if 'user_profile' not in st.session_state:
+        st.session_state.user_profile = {
+            'name': 'Guest User',
+            'email': 'guest@stockbot.com',
+            'risk_tolerance': 'Moderate',
+            'investment_horizon': '1-3 years',
+            'initial_capital': 100000.0,
+            'currency': 'USD',
+            'experience_level': 'Intermediate',
+            'investment_goals': ['Growth', 'Income'],
+            'preferred_sectors': ['Technology', 'Healthcare'],
+            'max_position_size': 10.0,  # percentage
+            'created_at': datetime.now().isoformat()
+        }
+    
+    # Portfolio
+    if 'portfolio' not in st.session_state:
+        st.session_state.portfolio = {
+            'holdings': {},  # {symbol: {'shares': float, 'avg_cost': float, 'purchase_date': str}}
+            'cash': 100000.0,
+            'total_value': 100000.0,
+            'daily_return': 0.0,
+            'total_return': 0.0,
+            'total_return_pct': 0.0,
+            'transactions': [],  # List of transaction records
+            'last_updated': datetime.now().isoformat()
+        }
+    
+    # Watchlist
+    if 'watchlist' not in st.session_state:
+        st.session_state.watchlist = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA']
+    
+    # Analysis preferences
+    if 'analysis_preferences' not in st.session_state:
+        st.session_state.analysis_preferences = {
+            'selected_stock': 'AAPL',
+            'analysis_period': '1y',
+            'show_sentiment': True,
+            'show_shap': False,
+            'model_trained': False,
+            'chart_type': 'candlestick',
+            'indicators': ['RSI', 'MACD', 'SMA_20', 'SMA_50']
+        }
+    
+    # Market data cache
+    if 'market_data' not in st.session_state:
+        st.session_state.market_data = {}
+    
+    # Application settings
+    if 'app_settings' not in st.session_state:
+        st.session_state.app_settings = {
+            'theme': 'minimal',
+            'data_refresh_interval': 300,  # seconds
+            'enable_notifications': True,
+            'auto_save': True,
+            'language': 'en',
+            'timezone': 'UTC'
+        }
+    
+    # Backtesting state
+    if 'backtesting' not in st.session_state:
+        st.session_state.backtesting = {
+            'strategy': None,
+            'results': None,
+            'parameters': {},
+            'last_run': None
+        }
+    
+    # Education progress
+    if 'education_progress' not in st.session_state:
+        st.session_state.education_progress = {
+            'completed_modules': [],
+            'current_module': None,
+            'quiz_scores': {},
+            'certificates': []
+        }
+
+def get_user_profile():
+    """Get user profile with defaults"""
+    if 'user_profile' not in st.session_state:
+        initialize_session_state()
+    return st.session_state.user_profile
+
+def get_portfolio():
+    """Get portfolio with defaults"""
+    if 'portfolio' not in st.session_state:
+        initialize_session_state()
+    return st.session_state.portfolio
+
+def update_user_profile(updates: dict):
+    """Update user profile"""
+    if 'user_profile' not in st.session_state:
+        initialize_session_state()
+    st.session_state.user_profile.update(updates)
+
+def update_portfolio(updates: dict):
+    """Update portfolio"""
+    if 'portfolio' not in st.session_state:
+        initialize_session_state()
+    st.session_state.portfolio.update(updates)
+    st.session_state.portfolio['last_updated'] = datetime.now().isoformat()
+
+def add_to_watchlist(symbol: str):
+    """Add symbol to watchlist"""
+    if 'watchlist' not in st.session_state:
+        initialize_session_state()
+    if symbol not in st.session_state.watchlist:
+        st.session_state.watchlist.append(symbol)
+
+def remove_from_watchlist(symbol: str):
+    """Remove symbol from watchlist"""
+    if 'watchlist' not in st.session_state:
+        initialize_session_state()
+    if symbol in st.session_state.watchlist:
+        st.session_state.watchlist.remove(symbol)
+
+def add_transaction(transaction: dict):
+    """Add transaction to portfolio"""
+    portfolio = get_portfolio()
+    portfolio['transactions'].append({
+        **transaction,
+        'timestamp': datetime.now().isoformat()
+    })
+    update_portfolio(portfolio)
+
+def clear_session_state():
+    """Clear all session state (for logout/reset)"""
+    keys_to_clear = [
+        'user_profile', 'portfolio', 'watchlist', 'analysis_preferences',
+        'market_data', 'backtesting', 'education_progress'
+    ]
+    for key in keys_to_clear:
+        if key in st.session_state:
+            del st.session_state[key]
+
 # Try importing transformers with fallback
 try:
     from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
