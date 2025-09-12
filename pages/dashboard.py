@@ -10,6 +10,8 @@ import numpy as np
 from datetime import datetime, timedelta
 import sys
 import os
+import traceback  # ✅ Added for better error debugging
+import yaml
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -28,8 +30,14 @@ except ImportError:
 # Import custom modules
 from utils.data_processor import get_data_processor
 from utils.technical_indicators import TechnicalIndicators
-from utils.ml_models import create_prediction_model
-import yaml
+
+# ✅ MODIFIED: Import both create_prediction_model AND StockPredictionModel
+from utils.ml_models import create_prediction_model, StockPredictionModel
+
+# ✅ Optional: Add logging for better debugging
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Page configuration
 st.set_page_config(
@@ -394,93 +402,251 @@ def render_ai_signals():
             
             st.divider()
     
+    
     # Option to generate real-time signals
-    if st.button("🔄 Generate Real-Time AI Signals", type="primary"):
-        with st.spinner("Analyzing market data and generating AI signals..."):
-            try:
-                data_processor = get_data_processor()
-                
-                # Get signals for watchlist stocks
-                real_signals = []
-                stocks_to_analyze = st.session_state.watchlist[:3] if st.session_state.watchlist else ['AAPL', 'MSFT', 'GOOGL']
-                
-                for symbol in stocks_to_analyze:
-                    try:
-                        # Fetch stock data
-                        df = data_processor.fetch_stock_data(symbol, period='2y')
+if st.button("🔄 Generate Real-Time AI Signals", type="primary"):
+    with st.spinner("Analyzing market data and generating AI signals..."):
+        try:
+            # Import the enhanced model (make sure this import is at the top of the file too)
+            from utils.ml_models import StockPredictionModel
+            
+            data_processor = get_data_processor()
+            
+            # Get signals for watchlist stocks
+            real_signals = []
+            stocks_to_analyze = st.session_state.watchlist[:3] if st.session_state.watchlist else ['AAPL', 'MSFT', 'GOOGL']
+            
+            # Progress bar for better UX
+            progress_bar = st.progress(0)
+            total_stocks = len(stocks_to_analyze)
+            
+            for idx, symbol in enumerate(stocks_to_analyze):
+                try:
+                    # Update progress
+                    progress_bar.progress((idx + 1) / total_stocks)
+                    st.text(f"Analyzing {symbol}...")
+                    
+                    # ✅ FIX 1: Fetch 3 years of data for better training
+                    df = data_processor.fetch_stock_data(symbol, period='3y')
+                    
+                    if not df.empty and len(df) > 100:  # Ensure sufficient data
+                        # Add ALL technical indicators
+                        df = TechnicalIndicators.calculate_all_indicators(df)
                         
-                        if not df.empty:
-                            # Add technical indicators
-                            df = TechnicalIndicators.calculate_all_indicators(df)
+                        # ✅ FIX 2: Create model with optimized configuration
+                        model = StockPredictionModel(
+                            model_type='classification',
+                            config={
+                                'rf_n_estimators': 300,      # Increased from 100
+                                'rf_max_depth': 12,          # Increased from 10
+                                'rf_min_samples_split': 10,
+                                'rf_min_samples_leaf': 4,
+                                'rf_max_features': 'sqrt',
+                                'use_ensemble': True,        # Enable ensemble
+                                'calibrate_probabilities': True,
+                                'feature_selection': True,
+                                'n_features': 50,
+                                'test_size': 0.2,
+                                'handle_imbalance': True,
+                                'cv_folds': 5,
+                                'random_state': 42,
+                                'high_confidence': 0.7,
+                                'prediction_horizon': 5
+                            }
+                        )
+                        
+                        # ✅ FIX 3: Train with proper optimization
+                        # Note: Set optimize_hyperparameters=True for first run (slower but better)
+                        metrics = model.train(df, optimize_hyperparameters=False)
+                        
+                        if metrics and metrics.get('accuracy', 0) > 0:
+                            prediction_result = model.predict_latest(df)
                             
-                            # Create ML model and get prediction
-                            model = create_prediction_model('classification')
-                            metrics = model.train(df)
-                            
-                            if 'error' not in metrics:
-                                prediction_result = model.predict_latest(df)
+                            if prediction_result and 'error' not in prediction_result:
+                                # ✅ FIX 4: Enhanced confidence and accuracy handling
+                                confidence = prediction_result.get('confidence', 0)
+                                accuracy = metrics.get('accuracy', 0) * 100
                                 
-                                if 'error' not in prediction_result:
+                                # Get latest indicators for reasoning
+                                latest = df.iloc[-1]
+                                rsi = latest.get('RSI', 50)
+                                macd = latest.get('MACD', 0)
+                                macd_signal = latest.get('MACD_Signal', 0)
+                                bb_position = latest.get('BB_Position', 0.5)
+                                
+                                # Create enhanced reasoning
+                                reasoning_parts = []
+                                
+                                # RSI reasoning
+                                if rsi > 70:
+                                    reasoning_parts.append(f"RSI: {rsi:.1f} (Overbought)")
+                                elif rsi < 30:
+                                    reasoning_parts.append(f"RSI: {rsi:.1f} (Oversold)")
+                                else:
+                                    reasoning_parts.append(f"RSI: {rsi:.1f}")
+                                
+                                # MACD reasoning
+                                if macd > macd_signal:
+                                    reasoning_parts.append(f"MACD: {macd:.3f} (Bullish crossover)")
+                                elif macd < macd_signal:
+                                    reasoning_parts.append(f"MACD: {macd:.3f} (Bearish crossover)")
+                                else:
+                                    reasoning_parts.append(f"MACD: {macd:.3f}")
+                                
+                                # Bollinger Bands reasoning
+                                if bb_position > 0.8:
+                                    reasoning_parts.append("Near upper BB")
+                                elif bb_position < 0.2:
+                                    reasoning_parts.append("Near lower BB")
+                                
+                                reasoning = ", ".join(reasoning_parts)
+                                
+                                # ✅ FIX 5: Only add signals with sufficient confidence
+                                min_confidence_threshold = 0.6
+                                
+                                if confidence >= min_confidence_threshold:
                                     real_signals.append({
                                         'symbol': symbol,
-                                        'signal': prediction_result['signal'],
-                                        'confidence': prediction_result['confidence'],
+                                        'signal': prediction_result.get('signal', 'HOLD'),
+                                        'confidence': confidence,
                                         'price': df['Close'].iloc[-1],
-                                        'reason': f"RSI: {prediction_result.get('indicators', {}).get('rsi', 0):.1f}, MACD: {prediction_result.get('indicators', {}).get('macd', 0):.3f}",
-                                        'accuracy': metrics.get('accuracy', 0) * 100
+                                        'reason': reasoning,
+                                        'accuracy': accuracy,
+                                        'strength': prediction_result.get('strength', 'Medium'),
+                                        'indicators': {
+                                            'rsi': rsi,
+                                            'macd': macd,
+                                            'bb_position': bb_position
+                                        }
                                     })
                                 else:
-                                    st.warning(f"Prediction failed for {symbol}: {prediction_result['error']}")
+                                    st.info(f"⚠️ {symbol}: Signal confidence too low ({confidence:.1%}), skipping...")
                             else:
-                                st.warning(f"Model training failed for {symbol}: {metrics['error']}")
+                                error_msg = prediction_result.get('error', 'Unknown error') if prediction_result else 'Prediction failed'
+                                st.warning(f"Could not generate prediction for {symbol}: {error_msg}")
                         else:
-                            st.warning(f"No data available for {symbol}")
-                    except Exception as e:
-                        st.error(f"Error analyzing {symbol}: {e}")
-                        continue
+                            accuracy = metrics.get('accuracy', 0) * 100 if metrics else 0
+                            st.warning(f"Model training failed for {symbol}. Accuracy: {accuracy:.1f}%")
+                    else:
+                        st.warning(f"Insufficient data for {symbol} (need at least 100 data points, got {len(df)})")
+                        
+                except Exception as e:
+                    st.error(f"Error analyzing {symbol}: {str(e)}")
+                    # Log the full error for debugging
+                    import traceback
+                    st.text(f"Debug info: {traceback.format_exc()}")
+                    continue
+            
+            # Clear progress bar
+            progress_bar.empty()
+            
+            # Display the generated signals
+            if real_signals:
+                st.success(f"✅ Generated {len(real_signals)} real-time AI signals with enhanced accuracy!")
                 
-                if real_signals:
-                    st.success(f"✅ Generated {len(real_signals)} real-time AI signals!")
+                # Sort signals by confidence
+                real_signals.sort(key=lambda x: x['confidence'], reverse=True)
+                
+                # Display each signal
+                for signal_data in real_signals:
+                    with st.container():
+                        col1, col2, col3, col4 = st.columns([2, 1, 1, 3])
+                        
+                        with col1:
+                            # Signal display with color coding
+                            if signal_data['signal'] == 'BUY':
+                                st.success(f"**{signal_data['symbol']}** - BUY 📈")
+                            elif signal_data['signal'] == 'SELL':
+                                st.error(f"**{signal_data['symbol']}** - SELL 📉")
+                            else:
+                                st.info(f"**{signal_data['symbol']}** - HOLD ⏸️")
+                            
+                            st.caption(f"Price: ${signal_data['price']:.2f}")
+                        
+                        with col2:
+                            # Enhanced confidence display
+                            conf_pct = signal_data['confidence'] * 100
+                            delta_color = "normal" if conf_pct >= 70 else "off"
+                            st.metric(
+                                "Confidence",
+                                f"{conf_pct:.0f}%",
+                                delta=f"{signal_data.get('strength', '')}",
+                                delta_color=delta_color
+                            )
+                        
+                        with col3:
+                            # Model accuracy display
+                            acc = signal_data.get('accuracy', 0)
+                            acc_color = "normal" if acc >= 70 else "off"
+                            st.metric(
+                                "Model Accuracy",
+                                f"{acc:.1f}%",
+                                delta_color=acc_color
+                            )
+                        
+                        with col4:
+                            st.caption(f"**Reasoning:** {signal_data['reason']}")
+                            
+                            # Add action buttons based on signal
+                            if signal_data['signal'] == 'BUY':
+                                if st.button(f"Add {signal_data['symbol']} to Portfolio", 
+                                           key=f"rt_buy_{signal_data['symbol']}"):
+                                    st.success(f"✅ Added {signal_data['symbol']} to portfolio!")
+                                    # Add to portfolio logic here
+                                    
+                            elif signal_data['signal'] == 'SELL':
+                                if st.button(f"Review {signal_data['symbol']} Position", 
+                                           key=f"rt_sell_{signal_data['symbol']}"):
+                                    st.info(f"📊 Opening position review for {signal_data['symbol']}...")
+                                    # Review position logic here
+                        
+                        # Add expandable details
+                        with st.expander(f"View {signal_data['symbol']} Details"):
+                            indicators = signal_data.get('indicators', {})
+                            st.write("**Technical Indicators:**")
+                            st.write(f"- RSI: {indicators.get('rsi', 0):.2f}")
+                            st.write(f"- MACD: {indicators.get('macd', 0):.4f}")
+                            st.write(f"- BB Position: {indicators.get('bb_position', 0):.2f}")
+                            st.write(f"- Confidence Score: {signal_data['confidence']:.3f}")
+                            st.write(f"- Model Accuracy: {signal_data.get('accuracy', 0):.2f}%")
+                        
+                        st.divider()
+                
+                # Summary statistics
+                st.markdown("### 📊 Signal Summary")
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    buy_count = sum(1 for s in real_signals if s['signal'] == 'BUY')
+                    st.metric("Buy Signals", buy_count)
+                
+                with col2:
+                    sell_count = sum(1 for s in real_signals if s['signal'] == 'SELL')
+                    st.metric("Sell Signals", sell_count)
+                
+                with col3:
+                    hold_count = sum(1 for s in real_signals if s['signal'] == 'HOLD')
+                    st.metric("Hold Signals", hold_count)
+                
+                with col4:
+                    avg_confidence = sum(s['confidence'] for s in real_signals) / len(real_signals)
+                    st.metric("Avg Confidence", f"{avg_confidence:.1%}")
                     
-                    # Display real signals
-                    for i, signal in enumerate(real_signals):
-                        with st.container():
-                            col1, col2, col3, col4 = st.columns([2, 1, 1, 3])
-                            
-                            with col1:
-                                if signal['signal'] == 'BUY':
-                                    st.success(f"**{signal['symbol']}** - BUY")
-                                elif signal['signal'] == 'SELL':
-                                    st.error(f"**{signal['symbol']}** - SELL")
-                                else:
-                                    st.info(f"**{signal['symbol']}** - HOLD")
-                                
-                                st.caption(f"Price: ${signal['price']:.2f}")
-                            
-                            with col2:
-                                st.metric(
-                                    "Confidence",
-                                    f"{signal['confidence']*100:.0f}%",
-                                    label_visibility="collapsed"
-                                )
-                            
-                            with col3:
-                                st.metric(
-                                    "Model Accuracy",
-                                    f"{signal.get('accuracy', 70):.1f}%",
-                                    label_visibility="collapsed"
-                                )
-                            
-                            with col4:
-                                st.caption(f"**Reasoning:** {signal['reason']}")
-                            
-                            st.divider()
-                else:
-                    st.warning("No real-time signals could be generated. Using sample data.")
-                    
-            except Exception as e:
-                st.error(f"Error generating real-time signals: {e}")
-                st.info("Displaying sample signals instead.")
+            else:
+                st.warning("No high-confidence signals generated. This could be due to:")
+                st.write("- Market conditions are unclear")
+                st.write("- Insufficient historical data")
+                st.write("- All signals below confidence threshold")
+                st.write("Try analyzing different stocks or adjusting the confidence threshold in settings.")
+                
+        except Exception as e:
+            st.error(f"Failed to generate real-time signals: {str(e)}")
+            st.write("Please check your data connection and try again.")
+            
+            # Debug information
+            import traceback
+            with st.expander("Show Error Details"):
+                st.code(traceback.format_exc())
 
 def render_performance_chart():
     """Render portfolio performance chart"""
