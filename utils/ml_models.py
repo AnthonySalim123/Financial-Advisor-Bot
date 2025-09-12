@@ -696,7 +696,7 @@ class MLModel:
             X = X[valid_idx]
             y = y[valid_idx]
             
-            if len(X) < 200:
+            if len(X) < 100:
                 raise ValueError("Insufficient data for training")
             
             # Time series split

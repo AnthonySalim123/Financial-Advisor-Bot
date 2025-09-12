@@ -407,7 +407,7 @@ def render_ai_signals():
                 for symbol in stocks_to_analyze:
                     try:
                         # Fetch stock data
-                        df = data_processor.fetch_stock_data(symbol, period='3mo')
+                        df = data_processor.fetch_stock_data(symbol, period='2y')
                         
                         if not df.empty:
                             # Add technical indicators
