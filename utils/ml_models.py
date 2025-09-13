@@ -1175,7 +1175,7 @@ def create_prediction_model(model_type='classification', config=None):
         config: Optional configuration dictionary
         
     Returns:
-        StockPredictionModel instance with optimized configuration
+        MLModel instance with optimized configuration  # ✅ CHANGED TO MLModel
     """
     # ✅ Enhanced default configuration for better accuracy
     enhanced_config = {
@@ -1219,10 +1219,10 @@ def create_prediction_model(model_type='classification', config=None):
     if config:
         enhanced_config.update(config)
     
-    # Create model with enhanced configuration
-    return StockPredictionModel(model_type, enhanced_config)
+    # ✅ CORRECTED: Use MLModel, not StockPredictionModel
+    return MLModel(model_type, enhanced_config)
 
-def get_cached_model(symbol: str, model_type: str = 'classification') -> StockPredictionModel:
+def get_cached_model(symbol: str, model_type: str = 'classification') -> 'MLModel':  # ✅ CHANGED
     """
     Get a cached model or create a new one
     
@@ -1252,6 +1252,13 @@ def get_cached_model(symbol: str, model_type: str = 'classification') -> StockPr
     logger.info(f"Created new model for {symbol}")
     return model
 
+# Add these imports at the top of this section if not already present:
+from datetime import datetime, timedelta
+
+# Model cache dictionary
+MODEL_CACHE = {}
+MODEL_CACHE_TIMESTAMPS = {}
+CACHE_DURATION = timedelta(hours=1)  # Cache models for 1 hour
 
 def get_model_info():
     """Get information about available models and features"""

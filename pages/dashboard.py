@@ -32,7 +32,7 @@ from utils.data_processor import get_data_processor
 from utils.technical_indicators import TechnicalIndicators
 
 # ✅ MODIFIED: Import both create_prediction_model AND StockPredictionModel
-from utils.ml_models import create_prediction_model, StockPredictionModel
+from utils.ml_models import create_prediction_model, MLModel
 
 # ✅ Optional: Add logging for better debugging
 import logging
@@ -434,7 +434,7 @@ if st.button("🔄 Generate Real-Time AI Signals", type="primary"):
                         df = TechnicalIndicators.calculate_all_indicators(df)
                         
                         # ✅ FIX 2: Create model with optimized configuration
-                        model = StockPredictionModel(
+                        model = MLModel(
                             model_type='classification',
                             config={
                                 'rf_n_estimators': 300,      # Increased from 100
