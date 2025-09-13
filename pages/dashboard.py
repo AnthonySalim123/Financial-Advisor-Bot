@@ -12,6 +12,7 @@ import sys
 import os
 import traceback  # ✅ Added for better error debugging
 import yaml
+from utils.ml_models import create_prediction_model, MLModel
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -408,7 +409,7 @@ if st.button("🔄 Generate Real-Time AI Signals", type="primary"):
     with st.spinner("Analyzing market data and generating AI signals..."):
         try:
             # Import the enhanced model (make sure this import is at the top of the file too)
-            from utils.ml_models import StockPredictionModel
+            
             
             data_processor = get_data_processor()
             

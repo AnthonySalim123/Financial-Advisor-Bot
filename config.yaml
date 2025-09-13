@@ -112,11 +112,24 @@ technical_indicators:
 ml_config:
   model_type: "RandomForest"
   parameters:
-    n_estimators: 100
-    max_depth: 10
-    min_samples_split: 5
-    min_samples_leaf: 2
+    n_estimators: 300        # ✅ CHANGED from 100
+    max_depth: 12           # ✅ CHANGED from 10
+    min_samples_split: 10   # ✅ CHANGED from 5
+    min_samples_leaf: 4     # ✅ CHANGED from 2
+    max_features: "sqrt"    # ✅ ADDED
     random_state: 42
+    
+    # Gradient Boosting parameters
+    gb_n_estimators: 200    # ✅ ADDED
+    gb_max_depth: 8         # ✅ ADDED
+    gb_learning_rate: 0.1   # ✅ ADDED
+    gb_subsample: 0.8       # ✅ ADDED
+    
+    # XGBoost parameters (if available)
+    xgb_n_estimators: 250   # ✅ ADDED
+    xgb_max_depth: 6        # ✅ ADDED
+    xgb_learning_rate: 0.1  # ✅ ADDED
+    xgb_subsample: 0.8      # ✅ ADDED
   
   features:
     - "RSI"
@@ -126,12 +139,54 @@ ml_config:
     - "Stochastic_K"
     - "Volume_Ratio"
     - "ATR"
+    - "SMA_20"              # ✅ ADDED
+    - "SMA_50"              # ✅ ADDED
+    - "EMA_12"              # ✅ ADDED
+    - "EMA_26"              # ✅ ADDED
+    - "Volume_MA"           # ✅ ADDED
+    - "High_Low_Spread"     # ✅ ADDED
+    - "Close_Open_Spread"   # ✅ ADDED
   
   training:
     test_size: 0.2
-    lookback_period: 60
+    lookback_period: 90     # ✅ CHANGED from 60
     prediction_horizon: 5
-    confidence_threshold: 0.65
+    confidence_threshold: 0.70  # ✅ CHANGED from 0.65
+    cv_folds: 5             # ✅ ADDED
+    handle_imbalance: true  # ✅ ADDED
+    use_ensemble: true      # ✅ ADDED
+    calibrate_probabilities: true  # ✅ ADDED
+    feature_selection: true # ✅ ADDED
+    n_features: 50          # ✅ ADDED
+    selection_method: "mutual_info"  # ✅ ADDED
+
+# Signal Generation
+signals:
+  buy_threshold: 0.02    # 2% expected gain
+  sell_threshold: -0.02  # 2% expected loss
+  hold_range: [-0.02, 0.02]
+  
+  confidence_levels:
+    high: 0.70          # ✅ CHANGED from 0.75
+    medium: 0.60
+    low: 0.45
+
+# Data Configuration
+data:
+  default_period: "3y"   # ✅ CHANGED from "1y" for better training
+  update_frequency: 300  # seconds
+  cache_duration: 3600   # seconds
+  
+  periods:
+    - "1d"
+    - "5d"
+    - "1mo"
+    - "3mo"
+    - "6mo"
+    - "1y"
+    - "2y"
+    - "3y"    # ✅ ADDED
+    - "5y"
 
 # Signal Generation
 signals:
