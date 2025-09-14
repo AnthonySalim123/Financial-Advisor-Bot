@@ -2,13 +2,13 @@
 import unittest
 import pandas as pd
 import numpy as np
-from utils.ml_models import StockPredictionModel
+from utils.ml_models import MLModel
 from utils.technical_indicators import TechnicalIndicators
 from utils.data_processor import StockDataProcessor
 
 class TestMLModel(unittest.TestCase):
     def setUp(self):
-        self.model = StockPredictionModel()
+        self.model = MLModel()
         self.test_data = self._create_test_data()
     
     def test_accuracy_above_threshold(self):

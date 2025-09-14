@@ -82,7 +82,7 @@ class StockDataProcessor:
         
         return stocks
     
-    def fetch_stock_data(self, symbol: str, period: str = '1y', interval: str = '1d') -> pd.DataFrame:
+    def fetch_stock_data(self, symbol: str, period: str = '3y', interval: str = '1d') -> pd.DataFrame:
         """
         Fetch stock data from Yahoo Finance with automatic fallback to synthetic data
         
