@@ -17,6 +17,10 @@ from utils.ml_models import create_prediction_model, MLModel
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Clear model cache on page load to force retraining
+if 'model_cache' in st.session_state:
+    del st.session_state['model_cache']
+
 # Plotly imports
 try:
     import plotly.graph_objects as go
@@ -438,15 +442,15 @@ if st.button("🔄 Generate Real-Time AI Signals", type="primary"):
                         model = MLModel(
                             model_type='classification',
                             config={
-                                'rf_n_estimators': 300,      # Increased from 100
-                                'rf_max_depth': 12,          # Increased from 10
-                                'rf_min_samples_split': 10,
-                                'rf_min_samples_leaf': 4,
+                                'rf_n_estimators': 500,      # Increased from 300
+                                'rf_max_depth': 15,          # Increased from 12
+                                'rf_min_samples_split': 5,   # Better for overfitting
+                                'rf_min_samples_leaf': 2,    # Better for overfitting
                                 'rf_max_features': 'sqrt',
                                 'use_ensemble': True,        # Enable ensemble
                                 'calibrate_probabilities': True,
                                 'feature_selection': True,
-                                'n_features': 50,
+                                'n_features': 50,           # Use top 50 features
                                 'test_size': 0.2,
                                 'handle_imbalance': True,
                                 'cv_folds': 5,
@@ -456,9 +460,16 @@ if st.button("🔄 Generate Real-Time AI Signals", type="primary"):
                             }
                         )
                         
-                        # ✅ FIX 3: Train with proper optimization
-                        # Note: Set optimize_hyperparameters=True for first run (slower but better)
+                        # ✅ FIX 3: FORCE RETRAINING (ADD THESE NEW LINES)
+                        # Clear any cached models to force fresh training
+                        model.is_trained = False
+                        model.selected_features = None
+
+                        # Train with the enhanced features
                         metrics = model.train(df, optimize_hyperparameters=False)
+
+                        # DEBUG: Show real accuracy (ADD THIS LINE)
+                        print(f"Model trained with accuracy: {metrics.get('accuracy', 0)*100:.1f}%")
                         
                         if metrics and metrics.get('accuracy', 0) > 0:
                             prediction_result = model.predict_latest(df)
@@ -503,7 +514,7 @@ if st.button("🔄 Generate Real-Time AI Signals", type="primary"):
                                 reasoning = ", ".join(reasoning_parts)
                                 
                                 # ✅ FIX 5: Only add signals with sufficient confidence
-                                min_confidence_threshold = 0.6
+                                min_confidence_threshold = 0.45
                                 
                                 if confidence >= min_confidence_threshold:
                                     real_signals.append({
