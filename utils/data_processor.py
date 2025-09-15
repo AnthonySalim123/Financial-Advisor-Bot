@@ -1,7 +1,8 @@
 # utils/data_processor.py
 """
-Data Processing Module
+Data Processing Module - Updated with 33 Stocks Support
 Handles all data fetching, caching, and preprocessing for the StockBot Advisor
+Includes support for Real Estate REITs and expanded Financial stocks
 """
 
 import yfinance as yf
@@ -38,7 +39,55 @@ except:
     logger.warning("Sentiment analyzer not available")
 
 class StockDataProcessor:
-    """Main class for processing stock market data"""
+    # Add this method to your StockDataProcessor class in utils/data_processor.py
+
+    def fetch_stock_data(self, symbol: str, period: str = '1y', 
+                        start_date: Optional[str] = None, 
+                        end_date: Optional[str] = None) -> pd.DataFrame:
+        """
+        Fetch stock data from yfinance with timezone handling
+        FIXED VERSION - Removes timezone info for consistent handling
+        """
+        try:
+            # Check cache first
+            cache_key = f"{symbol}_{period}_{start_date}_{end_date}"
+            if cache_key in self.cache:
+                last_update = self.last_update.get(cache_key, datetime.min)
+                if datetime.now() - last_update < timedelta(minutes=5):
+                    return self.cache[cache_key]
+            
+            # Fetch data
+            ticker = yf.Ticker(symbol)
+            
+            if start_date and end_date:
+                df = ticker.history(start=start_date, end=end_date, auto_adjust=True)
+            else:
+                df = ticker.history(period=period, auto_adjust=True)
+            
+            # FIX: Remove timezone information to avoid comparison issues
+            # This is the simplest solution that works consistently
+            if not df.empty and hasattr(df.index, 'tz'):
+                if df.index.tz is not None:
+                    # Convert to UTC then remove timezone
+                    df.index = df.index.tz_convert('UTC').tz_localize(None)
+            
+            # Cache the result
+            self.cache[cache_key] = df
+            self.last_update[cache_key] = datetime.now()
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error fetching data for {symbol}: {e}")
+            
+            # Try fallback data if available
+            if FALLBACK_AVAILABLE:
+                logger.info(f"Using fallback data for {symbol}")
+                return generate_synthetic_stock_data(symbol, period, start_date, end_date)
+            
+            return pd.DataFrame()
+        
+    """Main class for processing stock market data - Enhanced with 33 stocks"""
     
     def __init__(self, config_path='config.yaml'):
         """Initialize with configuration"""
@@ -68,19 +117,231 @@ class StockDataProcessor:
             return {}
     
     def get_stock_list(self) -> List[str]:
-        """Get complete list of stocks from configuration"""
+        """Get complete list of stocks from configuration - INCLUDING REAL ESTATE"""
         stocks = []
         
-        # Get stocks from each sector
-        for sector in ['technology', 'financial', 'healthcare']:
+        # Get stocks from each sector - UPDATED to include real_estate
+        for sector in ['technology', 'financial', 'real_estate', 'healthcare']:
             if sector in self.config.get('stocks', {}):
-                stocks.extend([s['symbol'] for s in self.config['stocks'][sector]])
+                sector_stocks = self.config['stocks'][sector]
+                # Handle both dict and string formats in config
+                for stock_item in sector_stocks:
+                    if isinstance(stock_item, dict) and 'symbol' in stock_item:
+                        stocks.append(stock_item['symbol'])
+                    elif isinstance(stock_item, str):
+                        stocks.append(stock_item)
         
         # Add benchmarks
         if 'benchmarks' in self.config.get('stocks', {}):
-            stocks.extend([b['symbol'] for b in self.config['stocks']['benchmarks']])
+            benchmark_items = self.config['stocks']['benchmarks']
+            for benchmark in benchmark_items:
+                if isinstance(benchmark, dict) and 'symbol' in benchmark:
+                    stocks.append(benchmark['symbol'])
+                elif isinstance(benchmark, str):
+                    stocks.append(benchmark)
         
         return stocks
+    
+    def get_stocks_by_sector(self, sector: str) -> List[str]:
+        """Get stocks for a specific sector"""
+        stocks = []
+        
+        if sector in self.config.get('stocks', {}):
+            sector_stocks = self.config['stocks'][sector]
+            for stock_item in sector_stocks:
+                if isinstance(stock_item, dict) and 'symbol' in stock_item:
+                    stocks.append(stock_item['symbol'])
+                elif isinstance(stock_item, str):
+                    stocks.append(stock_item)
+        
+        return stocks
+    
+    def calculate_sector_momentum(self, sector: str, period: int = 20) -> float:
+        """
+        Calculate sector momentum score
+        
+        Args:
+            sector: Sector name
+            period: Lookback period in days
+        
+        Returns:
+            Momentum score (-100 to 100)
+        """
+        try:
+            stocks = self.get_stocks_by_sector(sector)
+            if not stocks:
+                return 0
+            
+            momentum_scores = []
+            
+            for symbol in stocks:
+                df = self.fetch_stock_data(symbol, period='2mo')
+                if not df.empty and len(df) >= period:
+                    # Calculate momentum as percentage change
+                    momentum = ((df['Close'].iloc[-1] / df['Close'].iloc[-period]) - 1) * 100
+                    momentum_scores.append(momentum)
+            
+            if momentum_scores:
+                return round(np.mean(momentum_scores), 2)
+            return 0
+            
+        except Exception as e:
+            logger.error(f"Error calculating sector momentum: {e}")
+            return 0
+    
+    def fetch_reit_specific_data(self, symbol: str) -> Dict:
+        """
+        Fetch REIT-specific metrics
+        
+        Args:
+            symbol: REIT ticker symbol
+            
+        Returns:
+            Dictionary with REIT metrics
+        """
+        try:
+            ticker = yf.Ticker(symbol)
+            info = ticker.info
+            
+            # Get REIT-specific metrics
+            dividend_yield = info.get('dividendYield', 0)
+            # Fix for excessive dividend yield (if it's already in percentage)
+            if dividend_yield > 1:
+                dividend_yield = dividend_yield
+            else:
+                dividend_yield = dividend_yield * 100
+            
+            reit_metrics = {
+                'symbol': symbol,
+                'dividend_yield': dividend_yield,
+                'payout_ratio': info.get('payoutRatio', 0),
+                'price_to_book': info.get('priceToBook', 0),
+                'market_cap': info.get('marketCap', 0),
+                'debt_to_equity': info.get('debtToEquity', 0),
+                'beta': info.get('beta', 1),
+                'trailing_pe': info.get('trailingPE', 0),
+                'forward_pe': info.get('forwardPE', 0),
+                'reit_sector': self._classify_reit_sector(symbol),
+                'rate_sensitivity': self._calculate_rate_sensitivity(symbol, info.get('beta', 1))
+            }
+            
+            return reit_metrics
+            
+        except Exception as e:
+            logger.error(f"Error fetching REIT data for {symbol}: {e}")
+            return {}
+    
+    def _classify_reit_sector(self, symbol: str) -> str:
+        """Classify REIT by sector"""
+        reit_sectors = {
+            'PLD': 'Industrial/Logistics',
+            'AMT': 'Infrastructure/Towers',
+            'EQIX': 'Data Centers',
+            'SPG': 'Retail/Malls',
+            'O': 'Retail/Triple-Net-Lease'
+        }
+        return reit_sectors.get(symbol, 'Diversified')
+    
+    def _calculate_rate_sensitivity(self, symbol: str, beta: float) -> str:
+        """Calculate interest rate sensitivity for REITs"""
+        if beta > 1.2:
+            return "High"
+        elif beta > 0.8:
+            return "Moderate"
+        else:
+            return "Low"
+    
+    def fetch_financial_sector_data(self, symbol: str) -> Dict:
+        """
+        Fetch financial sector specific metrics
+        
+        Args:
+            symbol: Financial stock ticker
+            
+        Returns:
+            Dictionary with financial metrics
+        """
+        try:
+            ticker = yf.Ticker(symbol)
+            info = ticker.info
+            
+            # Determine if it's a bank
+            is_bank = symbol in ['JPM', 'BAC', 'GS', 'MS', 'WFC']
+            
+            financial_metrics = {
+                'symbol': symbol,
+                'market_cap': info.get('marketCap', 0),
+                'pe_ratio': info.get('trailingPE', 0),
+                'forward_pe': info.get('forwardPE', 0),
+                'price_to_book': info.get('priceToBook', 0),
+                'roe': info.get('returnOnEquity', 0) * 100 if info.get('returnOnEquity') else 0,
+                'roa': info.get('returnOnAssets', 0) * 100 if info.get('returnOnAssets') else 0,
+                'profit_margin': info.get('profitMargins', 0) * 100 if info.get('profitMargins') else 0,
+                'dividend_yield': info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0,
+                'beta': info.get('beta', 1),
+                'book_value': info.get('bookValue', 0),
+                'debt_to_equity': info.get('debtToEquity', 0),
+                'current_ratio': info.get('currentRatio', 0),
+            }
+            
+            # Bank-specific metrics
+            if is_bank:
+                financial_metrics.update({
+                    'is_bank': True,
+                    'tier1_capital_ratio': self._estimate_tier1_ratio(symbol),
+                    'efficiency_ratio': self._calculate_efficiency_ratio(info)
+                })
+            
+            # Payment processors specific (V, MA, AXP)
+            if symbol in ['V', 'MA', 'AXP']:
+                financial_metrics.update({
+                    'payment_processor': True,
+                    'operating_margin': info.get('operatingMargins', 0) * 100 if info.get('operatingMargins') else 0,
+                    'revenue_growth': info.get('revenueGrowth', 0) * 100 if info.get('revenueGrowth') else 0
+                })
+            
+            return financial_metrics
+            
+        except Exception as e:
+            logger.error(f"Error fetching financial data for {symbol}: {e}")
+            return {}
+    
+    def _estimate_tier1_ratio(self, symbol: str) -> float:
+        """Estimate Tier 1 Capital Ratio for banks"""
+        tier1_estimates = {
+            'JPM': 14.3,
+            'BAC': 13.8,
+            'WFC': 12.1,
+            'GS': 14.7,
+            'MS': 15.2
+        }
+        return tier1_estimates.get(symbol, 13.0)
+    
+    def _calculate_efficiency_ratio(self, info: Dict) -> float:
+        """Calculate efficiency ratio for banks"""
+        operating_margin = info.get('operatingMargins', 0)
+        if operating_margin > 0:
+            return round((1 - operating_margin) * 100, 2)
+        return 0
+    
+    def get_sector_summary(self) -> Dict:
+        """Get summary statistics for all sectors"""
+        summary = {}
+        
+        for sector in ['technology', 'financial', 'real_estate', 'healthcare']:
+            stocks = self.get_stocks_by_sector(sector)
+            
+            if stocks:
+                sector_data = {
+                    'stock_count': len(stocks),
+                    'stocks': stocks,
+                    'momentum': self.calculate_sector_momentum(sector)
+                }
+                summary[sector] = sector_data
+        
+        return summary
+    
+    # ============= KEEP ALL YOUR EXISTING METHODS BELOW =============
     
     def fetch_stock_data(self, symbol: str, period: str = '3y', interval: str = '1d') -> pd.DataFrame:
         """
@@ -259,79 +520,37 @@ class StockDataProcessor:
             ticker = yf.Ticker(symbol)
             info = ticker.info
             
-            # Check if we got valid info
-            if info and 'symbol' in info:
-                # Extract key metrics
-                metrics = {
+            if info:
+                return {
                     'symbol': symbol,
-                    'name': info.get('longName', symbol),
-                    'sector': info.get('sector', 'N/A'),
-                    'industry': info.get('industry', 'N/A'),
-                    'market_cap': info.get('marketCap', 0),
-                    'pe_ratio': info.get('trailingPE', 0),
-                    'forward_pe': info.get('forwardPE', 0),
-                    'peg_ratio': info.get('pegRatio', 0),
-                    'price_to_book': info.get('priceToBook', 0),
-                    'dividend_yield': info.get('dividendYield', 0),
-                    'profit_margin': info.get('profitMargins', 0),
-                    'operating_margin': info.get('operatingMargins', 0),
-                    'roe': info.get('returnOnEquity', 0),
-                    'roa': info.get('returnOnAssets', 0),
-                    'revenue_growth': info.get('revenueGrowth', 0),
-                    'earnings_growth': info.get('earningsGrowth', 0),
-                    'current_ratio': info.get('currentRatio', 0),
-                    'debt_to_equity': info.get('debtToEquity', 0),
-                    'free_cash_flow': info.get('freeCashflow', 0),
-                    'beta': info.get('beta', 1),
-                    '52_week_high': info.get('fiftyTwoWeekHigh', 0),
-                    '52_week_low': info.get('fiftyTwoWeekLow', 0),
-                    'average_volume': info.get('averageVolume', 0),
-                    'current_price': info.get('currentPrice', 0),
-                    'target_price': info.get('targetMeanPrice', 0),
-                    'recommendation': info.get('recommendationKey', 'none'),
+                    'name': info.get('longName', f'{symbol} Corporation'),
+                    'sector': info.get('sector', 'Technology'),
+                    'industry': info.get('industry', 'Software'),
+                    'market_cap': info.get('marketCap', 500000000000),
+                    'pe_ratio': info.get('trailingPE', 25.0),
+                    'forward_pe': info.get('forwardPE', 22.0),
+                    'peg_ratio': info.get('pegRatio', 1.5),
+                    'price_to_book': info.get('priceToBook', 5.0),
+                    'dividend_yield': info.get('dividendYield', 0.01),
+                    'profit_margin': info.get('profitMargins', 0.20),
+                    'operating_margin': info.get('operatingMargins', 0.25),
+                    'roe': info.get('returnOnEquity', 0.30),
+                    'roa': info.get('returnOnAssets', 0.15),
+                    'revenue_growth': info.get('revenueGrowth', 0.15),
+                    'earnings_growth': info.get('earningsGrowth', 0.20),
+                    'current_ratio': info.get('currentRatio', 2.0),
+                    'debt_to_equity': info.get('debtToEquity', 0.5),
+                    'free_cash_flow': info.get('freeCashflow', 10000000000),
+                    'beta': info.get('beta', 1.0),
+                    '52_week_high': info.get('fiftyTwoWeekHigh', 200),
+                    '52_week_low': info.get('fiftyTwoWeekLow', 100),
+                    'average_volume': info.get('averageVolume', 50000000),
+                    'current_price': info.get('currentPrice', 150),
+                    'target_price': info.get('targetMeanPrice', 175),
+                    'recommendation': info.get('recommendationKey', 'buy'),
                 }
-                
-                logger.info(f"Successfully fetched info for {symbol} from yfinance")
-                return metrics
-                
-        except Exception as e:
-            logger.warning(f"YFinance info failed for {symbol}: {e}")
-        
-        # USE FALLBACK
-        if FALLBACK_AVAILABLE:
-            from utils.fallback_data import get_synthetic_info
-            logger.info(f"Using synthetic info for {symbol}")
-            info = get_synthetic_info(symbol)
-            
-            # Return synthetic info with all fields
-            return {
-                'symbol': symbol,
-                'name': info.get('longName', f'{symbol} Corporation'),
-                'sector': info.get('sector', 'Technology'),
-                'industry': info.get('industry', 'Software'),
-                'market_cap': info.get('marketCap', 500000000000),
-                'pe_ratio': info.get('trailingPE', 25.0),
-                'forward_pe': info.get('forwardPE', 22.0),
-                'peg_ratio': info.get('pegRatio', 1.5),
-                'price_to_book': info.get('priceToBook', 5.0),
-                'dividend_yield': info.get('dividendYield', 0.01),
-                'profit_margin': info.get('profitMargins', 0.20),
-                'operating_margin': info.get('operatingMargins', 0.25),
-                'roe': info.get('returnOnEquity', 0.30),
-                'roa': info.get('returnOnAssets', 0.15),
-                'revenue_growth': info.get('revenueGrowth', 0.15),
-                'earnings_growth': info.get('earningsGrowth', 0.20),
-                'current_ratio': info.get('currentRatio', 2.0),
-                'debt_to_equity': info.get('debtToEquity', 0.5),
-                'free_cash_flow': info.get('freeCashflow', 10000000000),
-                'beta': info.get('beta', 1.0),
-                '52_week_high': 200,
-                '52_week_low': 100,
-                'average_volume': 50000000,
-                'current_price': 150,
-                'target_price': 175,
-                'recommendation': 'buy',
-            }
+        except:
+            pass
         
         return {'symbol': symbol, 'error': 'No data available'}
     
@@ -364,54 +583,38 @@ class StockDataProcessor:
                         'Symbol': symbol,
                         'Price': current_price,
                         'Change': change,
-                        'Change%': change_pct,
-                        'Volume': volume,
-                        'Prev_Close': prev_close,
-                        'Day_High': hist['High'].iloc[-1],
-                        'Day_Low': hist['Low'].iloc[-1]
+                        'Change %': change_pct,
+                        'Volume': volume
                     })
-                    logger.info(f"Fetched quote for {symbol} from yfinance")
                 else:
-                    raise ValueError("Empty or insufficient data")
-                    
-            except Exception as e:
-                logger.warning(f"YFinance quote failed for {symbol}: {e}")
-                
-                # USE FALLBACK
-                if FALLBACK_AVAILABLE:
-                    logger.info(f"Using synthetic quote for {symbol}")
-                    
-                    # Generate synthetic quote
-                    base_prices = {
-                        'AAPL': 150, 'MSFT': 350, 'GOOGL': 140,
-                        'NVDA': 450, 'AMZN': 170, 'META': 350,
-                        'JPM': 150, 'BAC': 35, 'GS': 350,
-                        'JNJ': 160, 'PFE': 45, 'UNH': 500
-                    }
-                    
-                    base_price = base_prices.get(symbol, 100)
-                    change_pct = np.random.uniform(-3, 3)
-                    current_price = base_price * (1 + change_pct/100)
-                    
+                    # Fallback
                     quotes_data.append({
                         'Symbol': symbol,
-                        'Price': current_price,
-                        'Change': current_price - base_price,
-                        'Change%': change_pct,
-                        'Volume': np.random.randint(1000000, 10000000),
-                        'Prev_Close': base_price,
-                        'Day_High': current_price * 1.02,
-                        'Day_Low': current_price * 0.98
+                        'Price': 100.0,
+                        'Change': 0.0,
+                        'Change %': 0.0,
+                        'Volume': 1000000
                     })
+                    
+            except Exception as e:
+                logger.warning(f"Failed to fetch quote for {symbol}: {e}")
+                # Fallback
+                quotes_data.append({
+                    'Symbol': symbol,
+                    'Price': 100.0,
+                    'Change': 0.0,
+                    'Change %': 0.0,
+                    'Volume': 1000000
+                })
         
         return pd.DataFrame(quotes_data)
     
     def get_market_overview(self) -> Dict:
         """
-        Get market overview with major indices
+        Get market overview data
         
         Returns:
-            Dictionary with market data
+            Dictionary with market indices data
         """
         indices = {
             '^GSPC': 'S&P 500',
@@ -461,73 +664,45 @@ class StockDataProcessor:
     
     def get_sector_performance(self) -> Dict:
         """
-        Get sector performance data
+        Get sector performance data - UPDATED with real_estate
         
         Returns:
             Dictionary with sector performance data
         """
         try:
-            # Define sector symbols - you can expand this based on your config
-            sectors = {
-                'Technology': ['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'META'],
-                'Financial': ['JPM', 'BAC', 'GS', 'MS', 'V'],
-                'Healthcare': ['JNJ', 'PFE', 'UNH', 'MRNA'],
-                'Energy': ['XOM', 'CVX', 'COP'],
-                'Consumer': ['AMZN', 'TSLA', 'HD', 'MCD']
-            }
-            
+            # Use sectors from config
             sector_performance = {}
             
-            for sector_name, symbols in sectors.items():
-                sector_returns = []
-                valid_symbols = []
+            for sector in ['technology', 'financial', 'real_estate', 'healthcare']:
+                stocks = self.get_stocks_by_sector(sector)
                 
-                for symbol in symbols:
-                    try:
-                        ticker = yf.Ticker(symbol)
-                        hist = ticker.history(period='1mo')
-                        
-                        if not hist.empty and len(hist) >= 2:
-                            # Calculate monthly return
-                            current_price = hist['Close'].iloc[-1]
-                            start_price = hist['Close'].iloc[0]
-                            monthly_return = (current_price / start_price - 1) * 100
+                if stocks:
+                    sector_returns = []
+                    for symbol in stocks[:3]:  # Sample first 3 stocks for efficiency
+                        try:
+                            ticker = yf.Ticker(symbol)
+                            hist = ticker.history(period='1mo')
                             
-                            sector_returns.append(monthly_return)
-                            valid_symbols.append(symbol)
-                            
-                    except Exception as e:
-                        logger.warning(f"Failed to fetch {symbol}: {e}")
-                        continue
-                
-                if sector_returns:
-                    avg_return = np.mean(sector_returns)
-                    sector_performance[sector_name] = {
-                        'return': avg_return,
-                        'symbols': valid_symbols,
-                        'count': len(valid_symbols)
-                    }
-                else:
-                    # Fallback with synthetic data
-                    sector_performance[sector_name] = {
-                        'return': np.random.uniform(-5, 10),
-                        'symbols': symbols[:3],
-                        'count': len(symbols[:3])
-                    }
+                            if not hist.empty and len(hist) >= 2:
+                                current_price = hist['Close'].iloc[-1]
+                                start_price = hist['Close'].iloc[0]
+                                monthly_return = (current_price / start_price - 1) * 100
+                                sector_returns.append(monthly_return)
+                        except:
+                            continue
+                    
+                    if sector_returns:
+                        avg_return = np.mean(sector_returns)
+                        sector_performance[sector.capitalize()] = {
+                            'return': avg_return,
+                            'count': len(stocks)
+                        }
             
-            logger.info("Sector performance calculated successfully")
             return sector_performance
             
         except Exception as e:
             logger.error(f"Error calculating sector performance: {e}")
-            # Return fallback data
-            return {
-                'Technology': {'return': 5.2, 'symbols': ['AAPL', 'MSFT', 'GOOGL'], 'count': 3},
-                'Financial': {'return': 3.1, 'symbols': ['JPM', 'BAC', 'GS'], 'count': 3},
-                'Healthcare': {'return': 2.8, 'symbols': ['JNJ', 'PFE', 'UNH'], 'count': 3},
-                'Energy': {'return': 7.5, 'symbols': ['XOM', 'CVX'], 'count': 2}
-            }
-
+            return {}
 
 # Singleton instance
 _data_processor_instance = None
@@ -539,5 +714,10 @@ def get_data_processor() -> StockDataProcessor:
         _data_processor_instance = StockDataProcessor()
     return _data_processor_instance
 
+# Alias for compatibility with enhanced_data_processor imports
+def get_enhanced_data_processor() -> StockDataProcessor:
+    """Get enhanced data processor (alias for compatibility)"""
+    return get_data_processor()
+
 # Print status on import
-logger.info("Data processor module loaded successfully")
+logger.info("Data processor module loaded successfully with 33 stocks support")

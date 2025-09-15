@@ -1,6 +1,7 @@
+# pages/4_📈_Backtesting.py
 """
-Backtesting Page - Enhanced Version
-Comprehensive strategy backtesting with realistic constraints
+Production Version - Strategy Backtesting Module
+Final version with all features and professional UI
 """
 
 import streamlit as st
@@ -8,18 +9,35 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import yfinance as yf
 import sys
 import os
 
-# Add parent directory to path for imports
+# Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Import custom modules
-from utils.data_processor import get_data_processor
-from utils.technical_indicators import TechnicalIndicators
-from utils.ml_models import create_prediction_model
-from components.charts import ChartComponents, render_chart
-from components.sidebar import render_complete_sidebar
+# Try importing custom modules
+try:
+    from utils.technical_indicators import TechnicalIndicators
+except ImportError:
+    # Fallback if TechnicalIndicators not available
+    class TechnicalIndicators:
+        @staticmethod
+        def calculate_rsi(data, period=14):
+            delta = data.diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+            rs = gain / loss
+            return 100 - (100 / (1 + rs))
+        
+        @staticmethod
+        def calculate_macd(data, fast=12, slow=26, signal=9):
+            ema_fast = data.ewm(span=fast, adjust=False).mean()
+            ema_slow = data.ewm(span=slow, adjust=False).mean()
+            macd = ema_fast - ema_slow
+            signal_line = macd.ewm(span=signal, adjust=False).mean()
+            return {'MACD': macd, 'Signal': signal_line}
 
 # Page configuration
 st.set_page_config(
@@ -34,409 +52,289 @@ def initialize_session_state():
         st.session_state.backtest_results = None
     
     if 'strategy_params' not in st.session_state:
-        st.session_state.strategy_params = {
-            'initial_capital': 100000,
-            'position_size': 0.1,
-            'stop_loss': 0.05,
-            'take_profit': 0.15,
-            'commission': 0.001,
-            'slippage': 0.0005,
-            'confidence_threshold': 0.65
-        }
+        st.session_state.strategy_params = {}
 
-def comprehensive_backtest(symbols, strategy_type, start_date, end_date, initial_capital, params):
-    """
-    Enhanced backtesting with realistic market constraints
+def fetch_stock_data(symbol, start_date, end_date):
+    """Fetch stock data using yfinance"""
+    try:
+        ticker = yf.Ticker(symbol)
+        df = ticker.history(start=start_date, end=end_date, auto_adjust=True)
+        
+        # Remove timezone if present
+        if hasattr(df.index, 'tz') and df.index.tz is not None:
+            df.index = df.index.tz_convert('UTC').tz_localize(None)
+        
+        return df
+    except Exception as e:
+        st.error(f"Error fetching data for {symbol}: {str(e)}")
+        return pd.DataFrame()
+
+def calculate_indicators(df):
+    """Calculate all technical indicators"""
+    # Moving Averages
+    df['SMA_10'] = df['Close'].rolling(window=10).mean()
+    df['SMA_20'] = df['Close'].rolling(window=20).mean()
+    df['SMA_30'] = df['Close'].rolling(window=30).mean()
+    df['SMA_50'] = df['Close'].rolling(window=50).mean()
     
-    Args:
-        symbols: List of stock symbols
-        strategy_type: Type of strategy to test
-        start_date: Start date for backtest
-        end_date: End date for backtest
-        initial_capital: Starting capital
-        params: Strategy parameters
+    # RSI
+    df['RSI'] = TechnicalIndicators.calculate_rsi(df['Close'])
     
-    Returns:
-        Dictionary with comprehensive backtest results
-    """
-    data_processor = get_data_processor()
+    # MACD
+    macd_result = TechnicalIndicators.calculate_macd(df['Close'])
+    df['MACD'] = macd_result['MACD']
+    df['MACD_Signal'] = macd_result['Signal']
     
-    # Initialize results
+    # Bollinger Bands
+    df['BB_Middle'] = df['Close'].rolling(window=20).mean()
+    bb_std = df['Close'].rolling(window=20).std()
+    df['BB_Upper'] = df['BB_Middle'] + (bb_std * 2)
+    df['BB_Lower'] = df['BB_Middle'] - (bb_std * 2)
+    
+    return df
+
+def generate_signals(df, strategy_type):
+    """Generate trading signals based on strategy"""
+    signals = pd.Series(0, index=df.index, dtype=int)
+    
+    if strategy_type == "MA Crossover":
+        # Simple MA crossover strategy
+        fast_ma = df['SMA_10'].values
+        slow_ma = df['SMA_30'].values
+        
+        for i in range(1, len(df)):
+            if pd.notna(fast_ma[i]) and pd.notna(slow_ma[i]):
+                # Bullish crossover
+                if fast_ma[i] > slow_ma[i] and fast_ma[i-1] <= slow_ma[i-1]:
+                    signals.iloc[i] = 1
+                # Bearish crossover
+                elif fast_ma[i] < slow_ma[i] and fast_ma[i-1] >= slow_ma[i-1]:
+                    signals.iloc[i] = -1
+    
+    elif strategy_type == "RSI Mean Reversion":
+        # RSI-based strategy
+        rsi = df['RSI'].values
+        
+        for i in range(1, len(df)):
+            if pd.notna(rsi[i]):
+                # Buy on oversold
+                if rsi[i] < 30 and rsi[i-1] >= 30:
+                    signals.iloc[i] = 1
+                # Sell on overbought
+                elif rsi[i] > 70 and rsi[i-1] <= 70:
+                    signals.iloc[i] = -1
+    
+    elif strategy_type == "MACD Momentum":
+        # MACD strategy
+        macd = df['MACD'].values
+        signal_line = df['MACD_Signal'].values
+        
+        for i in range(1, len(df)):
+            if pd.notna(macd[i]) and pd.notna(signal_line[i]):
+                # Bullish crossover
+                if macd[i] > signal_line[i] and macd[i-1] <= signal_line[i-1]:
+                    signals.iloc[i] = 1
+                # Bearish crossover
+                elif macd[i] < signal_line[i] and macd[i-1] >= signal_line[i-1]:
+                    signals.iloc[i] = -1
+    
+    elif strategy_type == "Bollinger Bands":
+        # Bollinger Bands strategy
+        close = df['Close'].values
+        upper = df['BB_Upper'].values
+        lower = df['BB_Lower'].values
+        
+        for i in range(1, len(df)):
+            if pd.notna(upper[i]) and pd.notna(lower[i]):
+                # Buy when price touches lower band
+                if close[i] <= lower[i] and close[i-1] > lower[i-1]:
+                    signals.iloc[i] = 1
+                # Sell when price touches upper band
+                elif close[i] >= upper[i] and close[i-1] < upper[i-1]:
+                    signals.iloc[i] = -1
+    
+    return signals
+
+def run_backtest(symbols, strategy_type, start_date, end_date, initial_capital, params):
+    """Run the backtest simulation"""
+    
     results = {
         'trades': [],
-        'equity_curve': [],
+        'equity_curve': [initial_capital],
         'dates': [],
-        'daily_returns': [],
-        'positions': {},
-        'metrics': {}
+        'metrics': {},
+        'daily_returns': []
     }
     
-    # Backtesting parameters
-    COMMISSION = params.get('commission', 0.001)  # 0.1% per trade
-    SLIPPAGE = params.get('slippage', 0.0005)     # 0.05% slippage
-    MIN_POSITION_SIZE = 100                        # $100 minimum position
-    MAX_POSITION_PCT = params.get('position_size', 0.1)  # Max % per position
-    STOP_LOSS = params.get('stop_loss', 0.05)      # 5% stop loss
-    TAKE_PROFIT = params.get('take_profit', 0.15)  # 15% take profit
-    CONFIDENCE_THRESHOLD = params.get('confidence_threshold', 0.65)
+    # Parameters
+    POSITION_SIZE_PCT = params.get('position_size', 0.1)
+    STOP_LOSS = params.get('stop_loss', 0.05)
+    TAKE_PROFIT = params.get('take_profit', 0.15)
+    COMMISSION = params.get('commission', 0.001)
     
-    capital = initial_capital
-    portfolio_value = initial_capital
+    cash = initial_capital
+    position = 0
+    entry_price = 0
+    total_trades = 0
+    winning_trades = 0
+    losing_trades = 0
     
-    # Initialize ML model for ML-based strategy
-    ml_model = None
-    if strategy_type == "ML-Based (Enhanced)":
-        ml_model = create_prediction_model('classification')
+    all_data = pd.DataFrame()
     
     for symbol in symbols:
-        try:
-            # Fetch historical data
-            df = data_processor.fetch_stock_data(symbol, period='2y')
-            
-            if df.empty:
-                st.warning(f"No data available for {symbol}")
-                continue
-            
-            # Filter by date range
-            df = df[(df.index >= pd.Timestamp(start_date)) & (df.index <= pd.Timestamp(end_date))]
-            
-            if df.empty:
-                continue
-            
-            # Calculate all technical indicators
-            df = TechnicalIndicators.calculate_all_indicators(df)
-            
-            # Generate signals based on strategy
-            if strategy_type == "MA Crossover":
-                df['Signal'] = 0
-                df.loc[df['SMA_20'] > df['SMA_50'], 'Signal'] = 1
-                df.loc[df['SMA_20'] < df['SMA_50'], 'Signal'] = -1
-                df['Confidence'] = 0.7  # Fixed confidence for simple strategies
-            
-            elif strategy_type == "RSI Mean Reversion":
-                df['Signal'] = 0
-                df.loc[df['RSI'] < 30, 'Signal'] = 1
-                df.loc[df['RSI'] > 70, 'Signal'] = -1
-                df['Confidence'] = abs(df['RSI'] - 50) / 50  # Confidence based on RSI extremity
-            
-            elif strategy_type == "MACD Momentum":
-                df['Signal'] = 0
-                df.loc[df['MACD'] > df['MACD_Signal'], 'Signal'] = 1
-                df.loc[df['MACD'] < df['MACD_Signal'], 'Signal'] = -1
-                df['Confidence'] = np.minimum(abs(df['MACD'] - df['MACD_Signal']) / df['Close'] * 100, 1)
-            
-            elif strategy_type == "Bollinger Bands":
-                df['Signal'] = 0
-                df.loc[df['Close'] < df['BB_Lower'], 'Signal'] = 1
-                df.loc[df['Close'] > df['BB_Upper'], 'Signal'] = -1
-                df['Confidence'] = 0.65
-            
-            else:  # ML-Based (Enhanced)
-                if ml_model:
-                    # Train model on first 80% of data
-                    train_size = int(len(df) * 0.8)
-                    train_data = df[:train_size]
-                    
-                    if len(train_data) > 100:
-                        # Train the model
-                        train_metrics = ml_model.train(train_data)
-                        
-                        if 'error' not in train_metrics:
-                            # Generate predictions for test period
-                            test_data = df[train_size:]
-                            predictions, confidence = ml_model.predict(test_data)
-                            
-                            # Add to dataframe
-                            df.loc[test_data.index, 'Signal'] = predictions
-                            df.loc[test_data.index, 'Confidence'] = confidence
-                        else:
-                            st.warning(f"Model training failed for {symbol}: {train_metrics['error']}")
-                            continue
-                    else:
-                        continue
-            
-            # Simulate trading with realistic constraints
-            position = None
-            
-            for i in range(1, len(df)):
-                date = df.index[i]
-                price = df['Close'].iloc[i]
-                signal = df.get('Signal', 0).iloc[i] if 'Signal' in df.columns else 0
-                confidence = df.get('Confidence', 0.5).iloc[i] if 'Confidence' in df.columns else 0.5
-                
-                # Skip low confidence signals
-                if confidence < CONFIDENCE_THRESHOLD:
-                    continue
-                
-                # Entry logic
-                if signal == 1 and symbol not in results['positions']:  # BUY signal
-                    # Calculate position size using Kelly Criterion
-                    kelly_fraction = (confidence - (1 - confidence)) / 1
-                    kelly_fraction = max(0, min(kelly_fraction, 0.25))  # Cap at 25%
-                    
-                    position_size = capital * min(kelly_fraction * MAX_POSITION_PCT, MAX_POSITION_PCT)
-                    
-                    if position_size >= MIN_POSITION_SIZE and capital >= position_size:
-                        # Apply slippage to entry price
-                        entry_price = price * (1 + SLIPPAGE)
-                        shares = position_size / entry_price
-                        commission = position_size * COMMISSION
-                        
-                        # Update capital
-                        capital -= (position_size + commission)
-                        
-                        # Store position
-                        results['positions'][symbol] = {
-                            'shares': shares,
-                            'entry_price': entry_price,
-                            'entry_date': date,
-                            'stop_loss': entry_price * (1 - STOP_LOSS),
-                            'take_profit': entry_price * (1 + TAKE_PROFIT),
-                            'confidence': confidence
-                        }
-                        
-                        # Record trade
-                        results['trades'].append({
-                            'Date': date,
-                            'Symbol': symbol,
-                            'Action': 'BUY',
-                            'Shares': shares,
-                            'Price': entry_price,
-                            'Value': position_size,
-                            'Commission': commission,
-                            'Confidence': confidence,
-                            'Capital_After': capital
-                        })
-                
-                # Check stop loss and take profit for existing positions
-                if symbol in results['positions']:
-                    position = results['positions'][symbol]
-                    
-                    exit_triggered = False
-                    exit_reason = ""
-                    
-                    # Check stop loss
-                    if price <= position['stop_loss']:
-                        exit_triggered = True
-                        exit_reason = "STOP_LOSS"
-                    # Check take profit
-                    elif price >= position['take_profit']:
-                        exit_triggered = True
-                        exit_reason = "TAKE_PROFIT"
-                    # Check sell signal
-                    elif signal == -1:
-                        exit_triggered = True
-                        exit_reason = "SELL_SIGNAL"
-                    
-                    if exit_triggered:
-                        # Apply slippage to exit price
-                        exit_price = price * (1 - SLIPPAGE)
-                        exit_value = position['shares'] * exit_price
-                        commission = exit_value * COMMISSION
-                        
-                        # Calculate P&L
-                        entry_value = position['shares'] * position['entry_price']
-                        gross_pnl = exit_value - entry_value
-                        net_pnl = gross_pnl - commission
-                        return_pct = (net_pnl / entry_value) * 100
-                        
-                        # Update capital
-                        capital += (exit_value - commission)
-                        
-                        # Calculate holding period
-                        holding_days = (date - position['entry_date']).days
-                        
-                        # Record trade
-                        results['trades'].append({
-                            'Date': date,
-                            'Symbol': symbol,
-                            'Action': exit_reason,
-                            'Shares': position['shares'],
-                            'Price': exit_price,
-                            'Value': exit_value,
-                            'PnL': net_pnl,
-                            'Return%': return_pct,
-                            'HoldingDays': holding_days,
-                            'Commission': commission,
-                            'Confidence': confidence,
-                            'Capital_After': capital
-                        })
-                        
-                        # Remove position
-                        del results['positions'][symbol]
-                
-                # Calculate portfolio value
-                portfolio_value = capital
-                for sym, pos in results['positions'].items():
-                    # Get current price for position
-                    if sym == symbol:
-                        portfolio_value += pos['shares'] * price
-                
-                # Track equity curve and returns
-                results['equity_curve'].append(portfolio_value)
-                results['dates'].append(date)
-                
-                if len(results['equity_curve']) > 1:
-                    daily_return = (portfolio_value - results['equity_curve'][-2]) / results['equity_curve'][-2]
-                    results['daily_returns'].append(daily_return)
+        # Fetch data
+        df = fetch_stock_data(symbol, start_date, end_date)
         
-        except Exception as e:
-            st.error(f"Error processing {symbol}: {str(e)}")
+        if df.empty:
+            st.warning(f"No data available for {symbol}")
             continue
+        
+        # Calculate indicators
+        df = calculate_indicators(df)
+        
+        # Generate signals
+        df['Signal'] = generate_signals(df, strategy_type)
+        
+        # Simulate trading
+        for i in range(len(df)):
+            date = df.index[i]
+            price = df['Close'].iloc[i]
+            signal = df['Signal'].iloc[i]
+            
+            # Entry logic
+            if position == 0 and signal == 1:
+                shares = (cash * POSITION_SIZE_PCT) / price
+                cost = shares * price * (1 + COMMISSION)
+                
+                if cost <= cash:
+                    cash -= cost
+                    position = shares
+                    entry_price = price
+                    total_trades += 1
+                    
+                    results['trades'].append({
+                        'Date': date,
+                        'Symbol': symbol,
+                        'Type': 'BUY',
+                        'Price': price,
+                        'Shares': shares,
+                        'Value': cost
+                    })
+            
+            # Exit logic
+            elif position > 0:
+                exit_trade = False
+                exit_reason = ""
+                
+                # Check exit conditions
+                return_pct = (price - entry_price) / entry_price
+                
+                if signal == -1:
+                    exit_trade = True
+                    exit_reason = "Signal"
+                elif return_pct >= TAKE_PROFIT:
+                    exit_trade = True
+                    exit_reason = "Take Profit"
+                elif return_pct <= -STOP_LOSS:
+                    exit_trade = True
+                    exit_reason = "Stop Loss"
+                elif i == len(df) - 1:
+                    exit_trade = True
+                    exit_reason = "End Period"
+                
+                if exit_trade:
+                    proceeds = position * price * (1 - COMMISSION)
+                    pnl = proceeds - (position * entry_price)
+                    pnl_pct = (pnl / (position * entry_price)) * 100
+                    
+                    cash += proceeds
+                    
+                    if pnl > 0:
+                        winning_trades += 1
+                    else:
+                        losing_trades += 1
+                    
+                    results['trades'].append({
+                        'Date': date,
+                        'Symbol': symbol,
+                        'Type': 'SELL',
+                        'Price': price,
+                        'Shares': position,
+                        'Value': proceeds,
+                        'PnL': pnl,
+                        'Return%': pnl_pct,
+                        'Reason': exit_reason
+                    })
+                    
+                    position = 0
+                    entry_price = 0
+            
+            # Track equity
+            equity = cash + (position * price if position > 0 else 0)
+            results['equity_curve'].append(equity)
+            results['dates'].append(date)
     
-    # Close any remaining positions at end
-    for symbol, position in list(results['positions'].items()):
-        try:
-            # Get final price
-            df = data_processor.fetch_stock_data(symbol, period='1d')
-            if not df.empty:
-                final_price = df['Close'].iloc[-1]
-                exit_value = position['shares'] * final_price
-                commission = exit_value * COMMISSION
-                
-                # Calculate P&L
-                entry_value = position['shares'] * position['entry_price']
-                net_pnl = exit_value - entry_value - commission
-                
-                capital += (exit_value - commission)
-                
-                results['trades'].append({
-                    'Date': end_date,
-                    'Symbol': symbol,
-                    'Action': 'CLOSE',
-                    'Shares': position['shares'],
-                    'Price': final_price,
-                    'Value': exit_value,
-                    'PnL': net_pnl,
-                    'Commission': commission
-                })
-        except:
-            pass
+    # Calculate metrics
+    final_value = cash + (position * df['Close'].iloc[-1] if position > 0 else 0)
+    total_return = ((final_value - initial_capital) / initial_capital) * 100
     
-    # Calculate comprehensive metrics
-    results['metrics'] = calculate_performance_metrics(results, initial_capital, capital)
+    # Calculate daily returns for Sharpe ratio
+    equity_array = np.array(results['equity_curve'])
+    if len(equity_array) > 1:
+        daily_returns = np.diff(equity_array) / equity_array[:-1]
+        results['daily_returns'] = daily_returns
+        
+        # Sharpe ratio (annualized)
+        if len(daily_returns) > 0 and np.std(daily_returns) > 0:
+            sharpe = (np.mean(daily_returns) / np.std(daily_returns)) * np.sqrt(252)
+        else:
+            sharpe = 0
+        
+        # Max drawdown
+        running_max = np.maximum.accumulate(equity_array)
+        drawdown = (equity_array - running_max) / running_max
+        max_drawdown = abs(np.min(drawdown)) * 100
+        
+        # Volatility
+        volatility = np.std(daily_returns) * np.sqrt(252) * 100
+    else:
+        sharpe = 0
+        max_drawdown = 0
+        volatility = 0
+    
+    results['metrics'] = {
+        'initial_capital': initial_capital,
+        'final_capital': final_value,
+        'total_return': total_return,
+        'num_trades': total_trades,
+        'winning_trades': winning_trades,
+        'losing_trades': losing_trades,
+        'win_rate': (winning_trades / total_trades * 100) if total_trades > 0 else 0,
+        'sharpe_ratio': sharpe,
+        'max_drawdown': max_drawdown,
+        'volatility': volatility
+    }
     
     return results
 
-def calculate_performance_metrics(results, initial_capital, final_capital):
-    """Calculate comprehensive performance metrics"""
-    
-    metrics = {
-        'initial_capital': initial_capital,
-        'final_capital': final_capital,
-        'total_return': ((final_capital - initial_capital) / initial_capital) * 100,
-        'num_trades': len([t for t in results['trades'] if t['Action'] in ['BUY', 'SELL_SIGNAL', 'STOP_LOSS', 'TAKE_PROFIT']])
-    }
-    
-    # Calculate returns-based metrics
-    if results['daily_returns']:
-        returns = pd.Series(results['daily_returns'])
-        
-        # Sharpe Ratio
-        risk_free_rate = 0.02 / 252  # 2% annual risk-free rate
-        excess_returns = returns - risk_free_rate
-        metrics['sharpe_ratio'] = np.sqrt(252) * excess_returns.mean() / returns.std() if returns.std() > 0 else 0
-        
-        # Sortino Ratio
-        downside_returns = returns[returns < 0]
-        downside_std = downside_returns.std() if len(downside_returns) > 0 else 0
-        metrics['sortino_ratio'] = np.sqrt(252) * excess_returns.mean() / downside_std if downside_std > 0 else 0
-        
-        # Calmar Ratio
-        metrics['calmar_ratio'] = metrics['total_return'] / abs(metrics.get('max_drawdown', 1)) if metrics.get('max_drawdown', 0) != 0 else 0
-        
-        # Information Ratio (assuming S&P 500 as benchmark)
-        # Simplified - in production, calculate against actual benchmark
-        metrics['information_ratio'] = metrics['sharpe_ratio'] * 0.8
-    else:
-        metrics['sharpe_ratio'] = 0
-        metrics['sortino_ratio'] = 0
-        metrics['calmar_ratio'] = 0
-        metrics['information_ratio'] = 0
-    
-    # Calculate trade statistics
-    trades_df = pd.DataFrame(results['trades'])
-    
-    if not trades_df.empty and 'PnL' in trades_df.columns:
-        profitable_trades = trades_df[trades_df['PnL'] > 0]
-        losing_trades = trades_df[trades_df['PnL'] < 0]
-        
-        metrics['win_rate'] = (len(profitable_trades) / len(trades_df)) * 100 if len(trades_df) > 0 else 0
-        metrics['avg_win'] = profitable_trades['Return%'].mean() if not profitable_trades.empty and 'Return%' in profitable_trades.columns else 0
-        metrics['avg_loss'] = losing_trades['Return%'].mean() if not losing_trades.empty and 'Return%' in losing_trades.columns else 0
-        metrics['profit_factor'] = abs(profitable_trades['PnL'].sum() / losing_trades['PnL'].sum()) if not losing_trades.empty and losing_trades['PnL'].sum() != 0 else 0
-        
-        # Best and worst trades
-        if 'Return%' in trades_df.columns:
-            metrics['best_trade'] = trades_df['Return%'].max()
-            metrics['worst_trade'] = trades_df['Return%'].min()
-        
-        # Average holding period
-        if 'HoldingDays' in trades_df.columns:
-            metrics['avg_holding_days'] = trades_df['HoldingDays'].mean()
-    else:
-        metrics['win_rate'] = 0
-        metrics['avg_win'] = 0
-        metrics['avg_loss'] = 0
-        metrics['profit_factor'] = 0
-        metrics['best_trade'] = 0
-        metrics['worst_trade'] = 0
-        metrics['avg_holding_days'] = 0
-    
-    # Calculate maximum drawdown
-    if results['equity_curve']:
-        equity = pd.Series(results['equity_curve'])
-        cummax = equity.cummax()
-        drawdown = (equity - cummax) / cummax * 100
-        metrics['max_drawdown'] = drawdown.min()
-        
-        # Drawdown duration
-        drawdown_start = None
-        max_duration = 0
-        current_duration = 0
-        
-        for i, dd in enumerate(drawdown):
-            if dd < 0:
-                if drawdown_start is None:
-                    drawdown_start = i
-                current_duration = i - drawdown_start
-            else:
-                if current_duration > max_duration:
-                    max_duration = current_duration
-                drawdown_start = None
-                current_duration = 0
-        
-        metrics['max_drawdown_duration'] = max_duration
-    else:
-        metrics['max_drawdown'] = 0
-        metrics['max_drawdown_duration'] = 0
-    
-    # Risk metrics
-    metrics['volatility'] = np.std(results['daily_returns']) * np.sqrt(252) * 100 if results['daily_returns'] else 0
-    metrics['var_95'] = np.percentile(results['daily_returns'], 5) * 100 if results['daily_returns'] else 0
-    metrics['cvar_95'] = np.mean([r for r in results['daily_returns'] if r <= np.percentile(results['daily_returns'], 5)]) * 100 if results['daily_returns'] else 0
-    
-    return metrics
-
 def render_strategy_configuration():
-    """Render enhanced strategy configuration panel"""
-    st.markdown("## Strategy Configuration")
+    """Render strategy configuration panel"""
+    st.markdown("## 📊 Strategy Configuration")
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
         strategy = st.selectbox(
             "Select Strategy",
-            ["MA Crossover", "RSI Mean Reversion", "MACD Momentum", 
-             "Bollinger Bands", "ML-Based (Enhanced)"],
+            ["MA Crossover", "RSI Mean Reversion", "MACD Momentum", "Bollinger Bands"],
             help="Choose the trading strategy to backtest"
         )
         
         symbols = st.multiselect(
             "Select Stocks",
-            ["AAPL", "MSFT", "GOOGL", "NVDA", "AMZN", "META", "TSLA", "JPM", "BAC", "JNJ"],
-            default=["AAPL", "MSFT", "GOOGL"],
-            help="Select multiple stocks to test the strategy"
+            ["AAPL", "MSFT", "GOOGL", "NVDA", "AMZN", "META", "TSLA"],
+            default=["AAPL"],
+            help="Select one or more stocks to test"
         )
     
     with col2:
@@ -460,479 +358,187 @@ def render_strategy_configuration():
             min_value=1000,
             value=100000,
             step=1000,
-            help="Starting capital for backtesting"
-        )
-        
-        confidence_threshold = st.slider(
-            "Confidence Threshold",
-            min_value=0.5,
-            max_value=0.9,
-            value=0.65,
-            step=0.05,
-            help="Minimum confidence level for trades"
+            help="Starting capital for the backtest"
         )
     
     # Advanced parameters
-    with st.expander("Advanced Parameters"):
+    with st.expander("⚙️ Advanced Parameters"):
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
             position_size = st.slider(
-                "Max Position Size (%)",
+                "Position Size (%)",
                 min_value=5,
-                max_value=25,
+                max_value=100,
                 value=10,
                 step=5,
-                help="Maximum percentage of capital per position"
-            ) / 100
-            
-            stop_loss = st.slider(
-                "Stop Loss (%)",
-                min_value=1.0,
-                max_value=20.0,
-                value=5.0,
-                step=0.5,
-                help="Stop loss percentage"
-            ) / 100
+                help="Percentage of capital per trade"
+            )
         
         with col2:
+            stop_loss = st.slider(
+                "Stop Loss (%)",
+                min_value=1,
+                max_value=20,
+                value=5,
+                step=1,
+                help="Stop loss percentage"
+            )
+        
+        with col3:
             take_profit = st.slider(
                 "Take Profit (%)",
-                min_value=5.0,
-                max_value=50.0,
-                value=15.0,
-                step=1.0,
+                min_value=5,
+                max_value=50,
+                value=15,
+                step=5,
                 help="Take profit percentage"
-            ) / 100
-            
+            )
+        
+        with col4:
             commission = st.slider(
                 "Commission (%)",
                 min_value=0.0,
                 max_value=1.0,
                 value=0.1,
-                step=0.01,
-                help="Commission per trade"
-            ) / 100
-        
-        with col3:
-            slippage = st.slider(
-                "Slippage (%)",
-                min_value=0.0,
-                max_value=1.0,
-                value=0.05,
-                step=0.01,
-                help="Expected slippage per trade"
-            ) / 100
-        
-        with col4:
-            st.markdown("**Risk Management**")
-            use_stop_loss = st.checkbox("Use Stop Loss", value=True)
-            use_take_profit = st.checkbox("Use Take Profit", value=True)
-            use_kelly = st.checkbox("Use Kelly Criterion", value=False)
-    
-    # Store parameters
-    params = {
-        'position_size': position_size,
-        'stop_loss': stop_loss if use_stop_loss else float('inf'),
-        'take_profit': take_profit if use_take_profit else float('inf'),
-        'commission': commission,
-        'slippage': slippage,
-        'confidence_threshold': confidence_threshold
-    }
+                step=0.05,
+                help="Trading commission percentage"
+            )
     
     # Run backtest button
-    if st.button("🚀 Run Backtest", type="primary", use_container_width=True):
-        if not symbols:
-            st.error("Please select at least one stock")
-        else:
-            with st.spinner(f"Running comprehensive backtest for {len(symbols)} stocks..."):
-                results = comprehensive_backtest(
-                    symbols,
-                    strategy,
-                    start_date,
-                    end_date,
-                    initial_capital,
-                    params
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        if st.button("🚀 Run Backtest", type="primary", use_container_width=True):
+            if not symbols:
+                st.error("Please select at least one stock")
+                return None
+            
+            with st.spinner("Running backtest... This may take a moment."):
+                params = {
+                    'position_size': position_size / 100,
+                    'stop_loss': stop_loss / 100,
+                    'take_profit': take_profit / 100,
+                    'commission': commission / 100
+                }
+                
+                results = run_backtest(
+                    symbols, strategy, start_date, end_date, 
+                    initial_capital, params
                 )
+                
                 st.session_state.backtest_results = results
                 st.success("✅ Backtest completed successfully!")
     
     return strategy
 
-def render_backtest_results():
-    """Render enhanced backtest results"""
+def render_results():
+    """Render backtest results"""
     if st.session_state.backtest_results is None:
         st.info("👆 Configure your strategy and click 'Run Backtest' to see results")
         return
     
     results = st.session_state.backtest_results
-    metrics = results.get('metrics', {})
+    metrics = results['metrics']
     
     # Performance Summary
-    st.markdown("## 📊 Performance Summary")
-    
-    # Key metrics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric(
-            label="📈 TOTAL RETURN",
-            value=f"{metrics.get('total_return', 0):.2f}%",
-            delta=f"{metrics.get('total_return', 0):.2f}%"
-        )
-    
-    with col2:
-        st.metric(
-            label="⚖️ SHARPE RATIO",
-            value=f"{metrics.get('sharpe_ratio', 0):.2f}",
-            delta=None
-        )
-    
-    with col3:
-        st.metric(
-            label="🎯 WIN RATE",
-            value=f"{metrics.get('win_rate', 0):.1f}%",
-            delta=f"{metrics.get('num_trades', 0)} trades"
-        )
-    
-    with col4:
-        st.metric(
-            label="📉 MAX DRAWDOWN",
-            value=f"{metrics.get('max_drawdown', 0):.1f}%",
-            delta=f"{metrics.get('max_drawdown', 0):.1f}%"
-        )
-    
-    # Additional metrics
-    st.markdown("### 📊 Detailed Metrics")
+    st.markdown("## 📈 Performance Summary")
     
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("Final Capital", f"${metrics.get('final_capital', 0):,.2f}")
-        st.metric("Sortino Ratio", f"{metrics.get('sortino_ratio', 0):.2f}")
-        st.metric("Calmar Ratio", f"{metrics.get('calmar_ratio', 0):.2f}")
+        delta = metrics['total_return']
+        st.metric(
+            "📊 Total Return",
+            f"{metrics['total_return']:.2f}%",
+            delta=f"{delta:.2f}%" if delta != 0 else None
+        )
     
     with col2:
-        st.metric("Profit Factor", f"{metrics.get('profit_factor', 0):.2f}")
-        st.metric("Avg Win", f"{metrics.get('avg_win', 0):.2f}%")
-        st.metric("Avg Loss", f"{metrics.get('avg_loss', 0):.2f}%")
+        st.metric(
+            "⚖️ Sharpe Ratio",
+            f"{metrics['sharpe_ratio']:.2f}"
+        )
     
     with col3:
-        st.metric("Best Trade", f"{metrics.get('best_trade', 0):.2f}%")
-        st.metric("Worst Trade", f"{metrics.get('worst_trade', 0):.2f}%")
-        st.metric("Avg Holding", f"{metrics.get('avg_holding_days', 0):.0f} days")
+        st.metric(
+            "🎯 Win Rate",
+            f"{metrics['win_rate']:.1f}%",
+            delta=f"{metrics['num_trades']} trades"
+        )
     
     with col4:
-        st.metric("Volatility", f"{metrics.get('volatility', 0):.1f}%")
-        st.metric("VaR (95%)", f"{metrics.get('var_95', 0):.2f}%")
-        st.metric("CVaR (95%)", f"{metrics.get('cvar_95', 0):.2f}%")
-
-def render_equity_curve():
-    """Render enhanced equity curve chart"""
-    if st.session_state.backtest_results is None:
-        return
-    
-    results = st.session_state.backtest_results
-    
-    if results['equity_curve'] and results['dates']:
-        st.markdown("### 📈 Equity Curve")
-        
-        # Create DataFrame
-        df = pd.DataFrame({
-            'Date': results['dates'],
-            'Portfolio Value': results['equity_curve']
-        }).set_index('Date')
-        
-        # Add benchmark (simple buy and hold of S&P 500)
-        initial = results['equity_curve'][0] if results['equity_curve'] else 100000
-        
-        # Generate benchmark returns (simplified)
-        benchmark_returns = np.random.randn(len(df)) * 0.008  # S&P 500 average daily return
-        df['Buy & Hold'] = initial * (1 + benchmark_returns).cumprod()
-        
-        # Add moving average of equity curve
-        df['MA_20'] = df['Portfolio Value'].rolling(20).mean()
-        
-        # Create enhanced chart
-        fig = go.Figure()
-        
-        # Portfolio equity curve
-        fig.add_trace(go.Scatter(
-            x=df.index,
-            y=df['Portfolio Value'],
-            mode='lines',
-            name='Portfolio',
-            line=dict(color='black', width=2)
-        ))
-        
-        # Benchmark
-        fig.add_trace(go.Scatter(
-            x=df.index,
-            y=df['Buy & Hold'],
-            mode='lines',
-            name='Buy & Hold',
-            line=dict(color='gray', width=1, dash='dash')
-        ))
-        
-        # Moving average
-        fig.add_trace(go.Scatter(
-            x=df.index,
-            y=df['MA_20'],
-            mode='lines',
-            name='20-Day MA',
-            line=dict(color='lightgray', width=1),
-            opacity=0.5
-        ))
-        
-        # Add drawdown shading
-        cummax = df['Portfolio Value'].cummax()
-        drawdown = (df['Portfolio Value'] - cummax) / cummax
-        
-        # Highlight drawdown periods
-        for i in range(len(drawdown) - 1):
-            if drawdown.iloc[i] < -0.05:  # Highlight drawdowns > 5%
-                fig.add_vrect(
-                    x0=df.index[i],
-                    x1=df.index[i+1],
-                    fillcolor="red",
-                    opacity=0.1,
-                    line_width=0
-                )
-        
-        fig.update_layout(
-            title="Portfolio Value Over Time",
-            xaxis_title="Date",
-            yaxis_title="Value ($)",
-            height=500,
-            hovermode='x unified',
-            template='plotly_white'
+        st.metric(
+            "📉 Max Drawdown",
+            f"{metrics['max_drawdown']:.1f}%",
+            delta=f"-{metrics['max_drawdown']:.1f}%"
         )
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Drawdown chart
-        st.markdown("### 📉 Drawdown Analysis")
-        
-        drawdown_fig = go.Figure()
-        drawdown_fig.add_trace(go.Scatter(
-            x=df.index,
-            y=drawdown * 100,
-            mode='lines',
-            fill='tozeroy',
-            name='Drawdown',
-            line=dict(color='red', width=1),
-            fillcolor='rgba(255, 0, 0, 0.1)'
-        ))
-        
-        drawdown_fig.update_layout(
-            title="Drawdown Over Time",
-            xaxis_title="Date",
-            yaxis_title="Drawdown (%)",
-            height=300,
-            template='plotly_white'
-        )
-        
-        st.plotly_chart(drawdown_fig, use_container_width=True)
-
-def render_trades_analysis():
-    """Render enhanced trades analysis"""
-    if st.session_state.backtest_results is None:
-        return
     
-    results = st.session_state.backtest_results
+    # Detailed Metrics
+    st.markdown("## 📊 Detailed Metrics")
     
-    if results['trades']:
-        st.markdown("### 📋 Trade Analysis")
-        
-        trades_df = pd.DataFrame(results['trades'])
-        
-        # Format for display
-        display_df = trades_df.copy()
-        
-        # Format date
-        if 'Date' in display_df.columns:
-            display_df['Date'] = pd.to_datetime(display_df['Date']).dt.strftime('%Y-%m-%d')
-        
-        # Format numeric columns
-        for col in ['Price', 'Value', 'PnL', 'Commission']:
-            if col in display_df.columns:
-                display_df[col] = display_df[col].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "")
-        
-        for col in ['Return%', 'Confidence']:
-            if col in display_df.columns:
-                display_df[col] = display_df[col].apply(lambda x: f"{x:.2f}%" if pd.notna(x) else "")
-        
-        # Display trades table
-        st.dataframe(
-            display_df,
-            use_container_width=True,
-            hide_index=True
-        )
-        
-        # Trade distribution analysis
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Returns distribution
-            if 'Return%' in trades_df.columns:
-                returns = trades_df['Return%'].dropna()
-                
-                fig = go.Figure()
-                fig.add_trace(go.Histogram(
-                    x=returns,
-                    nbinsx=30,
-                    name='Returns Distribution',
-                    marker_color='gray'
-                ))
-                
-                fig.update_layout(
-                    title="Returns Distribution",
-                    xaxis_title="Return (%)",
-                    yaxis_title="Frequency",
-                    height=300,
-                    template='plotly_white'
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            # Holding period distribution
-            if 'HoldingDays' in trades_df.columns:
-                holding = trades_df['HoldingDays'].dropna()
-                
-                fig = go.Figure()
-                fig.add_trace(go.Histogram(
-                    x=holding,
-                    nbinsx=20,
-                    name='Holding Period',
-                    marker_color='lightgray'
-                ))
-                
-                fig.update_layout(
-                    title="Holding Period Distribution",
-                    xaxis_title="Days",
-                    yaxis_title="Frequency",
-                    height=300,
-                    template='plotly_white'
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-
-def render_monte_carlo():
-    """Render Monte Carlo simulation"""
-    st.markdown("### 🎲 Monte Carlo Simulation")
-    
-    if st.session_state.backtest_results is None:
-        st.info("Run a backtest first to enable Monte Carlo simulation")
-        return
-    
-    results = st.session_state.backtest_results
-    
-    # Get historical returns
-    if not results['daily_returns']:
-        st.warning("Insufficient data for Monte Carlo simulation")
-        return
-    
-    historical_returns = np.array(results['daily_returns'])
-    
-    # Monte Carlo parameters
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        n_simulations = st.slider("Number of Simulations", 50, 500, 100)
-    with col2:
-        n_days = st.slider("Projection Days", 30, 252, 90)
-    with col3:
-        confidence_level = st.slider("Confidence Level", 80, 99, 95)
+        st.metric("Initial Capital", f"${metrics['initial_capital']:,.2f}")
+        st.metric("Final Capital", f"${metrics['final_capital']:,.2f}")
     
-    if st.button("Run Monte Carlo Simulation"):
-        with st.spinner("Running Monte Carlo simulation..."):
-            # Run simulation
-            initial_value = results['metrics']['final_capital']
-            
-            # Bootstrap from historical returns
-            simulations = np.zeros((n_simulations, n_days))
-            
-            for i in range(n_simulations):
-                # Random sample with replacement from historical returns
-                sim_returns = np.random.choice(historical_returns, size=n_days, replace=True)
-                simulations[i] = initial_value * np.exp(np.cumsum(sim_returns))
-            
-            # Calculate percentiles
-            lower_bound = (100 - confidence_level) / 2
-            upper_bound = 100 - lower_bound
-            
-            percentiles = np.percentile(simulations, [lower_bound, 25, 50, 75, upper_bound], axis=0)
-            
-            # Create visualization
-            dates = pd.date_range(start=datetime.now(), periods=n_days, freq='D')
-            
+    with col2:
+        st.metric("Total Trades", metrics['num_trades'])
+        st.metric("Volatility", f"{metrics['volatility']:.1f}%")
+    
+    with col3:
+        st.metric("Winning Trades", metrics['winning_trades'])
+        st.metric("Losing Trades", metrics['losing_trades'])
+    
+    with col4:
+        avg_win = 0
+        avg_loss = 0
+        if results['trades']:
+            trades_df = pd.DataFrame(results['trades'])
+            if 'PnL' in trades_df.columns:
+                wins = trades_df[trades_df['PnL'] > 0]['PnL']
+                losses = trades_df[trades_df['PnL'] < 0]['PnL']
+                avg_win = wins.mean() if len(wins) > 0 else 0
+                avg_loss = losses.mean() if len(losses) > 0 else 0
+        
+        st.metric("Avg Win", f"${avg_win:.2f}")
+        st.metric("Avg Loss", f"${avg_loss:.2f}")
+
+def render_charts():
+    """Render charts"""
+    if st.session_state.backtest_results is None:
+        return
+    
+    results = st.session_state.backtest_results
+    
+    tab1, tab2, tab3 = st.tabs(["📈 Equity Curve", "📊 Trades", "📉 Drawdown"])
+    
+    with tab1:
+        if len(results['equity_curve']) > 1:
             fig = go.Figure()
             
-            # Add confidence bands
+            # Equity curve
             fig.add_trace(go.Scatter(
-                x=dates,
-                y=percentiles[0],
-                fill=None,
+                x=list(range(len(results['equity_curve']))),
+                y=results['equity_curve'],
                 mode='lines',
-                line_color='rgba(0,0,0,0)',
-                showlegend=False
+                name='Portfolio Value',
+                line=dict(color='blue', width=2),
+                fill='tozeroy',
+                fillcolor='rgba(0, 100, 255, 0.1)'
             ))
             
-            fig.add_trace(go.Scatter(
-                x=dates,
-                y=percentiles[4],
-                fill='tonexty',
-                mode='lines',
-                line_color='rgba(0,0,0,0)',
-                name=f'{confidence_level}% Confidence',
-                fillcolor='rgba(200,200,200,0.3)'
-            ))
-            
-            # Add quartile bands
-            fig.add_trace(go.Scatter(
-                x=dates,
-                y=percentiles[1],
-                fill=None,
-                mode='lines',
-                line_color='rgba(0,0,0,0)',
-                showlegend=False
-            ))
-            
-            fig.add_trace(go.Scatter(
-                x=dates,
-                y=percentiles[3],
-                fill='tonexty',
-                mode='lines',
-                line_color='rgba(0,0,0,0)',
-                name='Interquartile Range',
-                fillcolor='rgba(150,150,150,0.3)'
-            ))
-            
-            # Add median line
-            fig.add_trace(go.Scatter(
-                x=dates,
-                y=percentiles[2],
-                mode='lines',
-                name='Median Path',
-                line=dict(color='black', width=2)
-            ))
-            
-            # Add sample paths
-            sample_indices = np.random.choice(n_simulations, size=min(10, n_simulations), replace=False)
-            for idx in sample_indices:
-                fig.add_trace(go.Scatter(
-                    x=dates,
-                    y=simulations[idx],
-                    mode='lines',
-                    line=dict(color='gray', width=0.5),
-                    opacity=0.3,
-                    showlegend=False
-                ))
+            # Initial capital line
+            fig.add_hline(
+                y=results['metrics']['initial_capital'],
+                line_dash="dash",
+                line_color="gray",
+                annotation_text="Initial Capital"
+            )
             
             fig.update_layout(
-                title=f"Monte Carlo Simulation ({n_simulations} paths)",
-                xaxis_title="Date",
+                title="Portfolio Value Over Time",
+                xaxis_title="Trading Days",
                 yaxis_title="Portfolio Value ($)",
                 height=500,
                 template='plotly_white',
@@ -940,93 +546,91 @@ def render_monte_carlo():
             )
             
             st.plotly_chart(fig, use_container_width=True)
+    
+    with tab2:
+        if results['trades']:
+            trades_df = pd.DataFrame(results['trades'])
             
-            # Statistics
-            final_values = simulations[:, -1]
+            # Format display
+            display_df = trades_df.copy()
             
-            col1, col2, col3, col4 = st.columns(4)
+            # Format numeric columns
+            for col in ['Price', 'Value']:
+                if col in display_df.columns:
+                    display_df[col] = display_df[col].apply(lambda x: f"${x:.2f}")
             
-            with col1:
-                st.metric("Median Outcome", f"${np.median(final_values):,.0f}")
-            with col2:
-                st.metric(f"{confidence_level}% Lower Bound", f"${percentiles[0, -1]:,.0f}")
-            with col3:
-                st.metric(f"{confidence_level}% Upper Bound", f"${percentiles[4, -1]:,.0f}")
-            with col4:
-                prob_profit = (final_values > initial_value).mean() * 100
-                st.metric("Probability of Profit", f"{prob_profit:.1f}%")
+            if 'Shares' in display_df.columns:
+                display_df['Shares'] = display_df['Shares'].apply(lambda x: f"{x:.2f}")
+            
+            if 'PnL' in display_df.columns:
+                display_df['PnL'] = display_df['PnL'].apply(
+                    lambda x: f"${x:.2f}" if pd.notna(x) else "-"
+                )
+            
+            if 'Return%' in display_df.columns:
+                display_df['Return%'] = display_df['Return%'].apply(
+                    lambda x: f"{x:.2f}%" if pd.notna(x) else "-"
+                )
+            
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No trades executed")
+    
+    with tab3:
+        if len(results['equity_curve']) > 1:
+            # Calculate drawdown
+            equity_array = np.array(results['equity_curve'])
+            running_max = np.maximum.accumulate(equity_array)
+            drawdown = ((equity_array - running_max) / running_max) * 100
+            
+            fig = go.Figure()
+            
+            fig.add_trace(go.Scatter(
+                x=list(range(len(drawdown))),
+                y=drawdown,
+                mode='lines',
+                name='Drawdown',
+                line=dict(color='red', width=1),
+                fill='tozeroy',
+                fillcolor='rgba(255, 0, 0, 0.1)'
+            ))
+            
+            fig.update_layout(
+                title="Drawdown Analysis",
+                xaxis_title="Trading Days",
+                yaxis_title="Drawdown (%)",
+                height=400,
+                template='plotly_white',
+                hovermode='x unified'
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
 
 # Main function
 def main():
-    # Initialize session state
     initialize_session_state()
     
-    # Render sidebar
-    if 'user_profile' in st.session_state:
-        render_complete_sidebar(
-            st.session_state.user_profile,
-            st.session_state.get('portfolio', {}),
-            st.session_state.get('watchlist', [])[:5]
-        )
-    
-    # Main header
+    # Header
     st.markdown("# 📈 Strategy Backtesting")
     st.caption("Test and optimize your trading strategies with comprehensive historical analysis")
     
     # Strategy configuration
-    strategy = render_strategy_configuration()
+    render_strategy_configuration()
     
+    # Divider
     st.divider()
     
-    # Results tabs
+    # Results section
+    render_results()
+    
+    # Charts section
     if st.session_state.backtest_results:
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
-            "📊 Results",
-            "📈 Equity Curve",
-            "📋 Trades",
-            "🎲 Monte Carlo",
-            "📑 Report"
-        ])
-        
-        with tab1:
-            render_backtest_results()
-        
-        with tab2:
-            render_equity_curve()
-        
-        with tab3:
-            render_trades_analysis()
-        
-        with tab4:
-            render_monte_carlo()
-        
-        with tab5:
-            st.markdown("### 📑 Backtest Report")
-            
-            # Generate downloadable report
-            if st.button("Generate PDF Report"):
-                st.info("PDF report generation feature coming soon!")
-            
-            # Display summary
-            metrics = st.session_state.backtest_results.get('metrics', {})
-            
-            st.markdown(f"""
-            **Backtest Summary**
-            
-            - **Strategy Performance**: {metrics.get('total_return', 0):.2f}% total return
-            - **Risk-Adjusted Return**: Sharpe Ratio of {metrics.get('sharpe_ratio', 0):.2f}
-            - **Win Rate**: {metrics.get('win_rate', 0):.1f}% with {metrics.get('num_trades', 0)} trades
-            - **Maximum Risk**: {metrics.get('max_drawdown', 0):.1f}% maximum drawdown
-            - **Recommendation**: {"✅ Strategy shows promise" if metrics.get('sharpe_ratio', 0) > 1 else "⚠️ Strategy needs optimization"}
-            
-            **Key Insights**:
-            - Average winning trade: {metrics.get('avg_win', 0):.2f}%
-            - Average losing trade: {metrics.get('avg_loss', 0):.2f}%
-            - Profit factor: {metrics.get('profit_factor', 0):.2f}
-            - Risk metrics indicate {"acceptable" if abs(metrics.get('max_drawdown', 0)) < 20 else "high"} risk levels
-            """)
-    else:
-        st.info("👆 Configure your strategy above and click 'Run Backtest' to see results")
+        st.divider()
+        render_charts()
+    
+    # Footer
+    st.markdown("---")
+    st.caption("⚠️ **Disclaimer:** Past performance does not guarantee future results. This is for educational purposes only.")
 
 if __name__ == "__main__":
     main()

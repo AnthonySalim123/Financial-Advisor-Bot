@@ -1,5 +1,6 @@
 """
 StockBot Advisor - Main Application
+Financial Advisory Bot with AI-Powered Stock Analysis
 Author: Anthony Winata Salim
 Student Number: 230726051
 Course: CM3070 Project
@@ -8,700 +9,937 @@ Course: CM3070 Project
 import streamlit as st
 import pandas as pd
 import numpy as np
-import yaml
-import os
 from datetime import datetime, timedelta
-from pathlib import Path
-import yfinance as yf
 import plotly.graph_objects as go
 import plotly.express as px
-from dotenv import load_dotenv# At the top of app.py, add:
-from utils.ollama_integration import OllamaExplainer
-from utils.user_evaluation import UserEvaluationSystem
+from plotly.subplots import make_subplots
+import yfinance as yf
+import json
+import sys
+import os
+import logging
+import warnings
+warnings.filterwarnings('ignore')
+
+# Add project root to path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+# Import custom modules with error handling
+try:
+    from utils.data_processor import get_data_processor
+except ImportError:
+    from utils.data_processor import StockDataProcessor
+    def get_data_processor():
+        return StockDataProcessor()
 
 try:
-    from utils.ollama_integration import OllamaExplainer
-    OLLAMA_AVAILABLE = True
+    from utils.technical_indicators import TechnicalIndicators
 except ImportError:
-    OLLAMA_AVAILABLE = False
-    print("Ollama integration not available")
+    print("Warning: TechnicalIndicators module not found")
+    TechnicalIndicators = None
 
 try:
-    from utils.user_evaluation import UserEvaluationSystem
-    EVALUATION_AVAILABLE = True
+    from utils.ml_models import create_prediction_model
 except ImportError:
-    EVALUATION_AVAILABLE = False
-    print("User evaluation system not available")
+    print("Warning: ML models module not found")
+    create_prediction_model = None
 
-# Then in your main() function, conditionally use them:
-def main():
-    # ... existing code ...
-    
-    # Initialize evaluation system if available
-    if EVALUATION_AVAILABLE:
-        evaluator = UserEvaluationSystem()
-        evaluator.render_feedback_form()
-    
-    # Initialize Ollama explainer if available
-    if OLLAMA_AVAILABLE and 'explainer' not in st.session_state:
-        st.session_state.explainer = OllamaExplainer()
+# Fix the LLM explainer import
+try:
+    from utils.llm_explainer import LLMExplainer  # Changed from get_llm_explainer
+    llm_explainer = LLMExplainer()  # Create instance if needed
+except ImportError:
+    print("Warning: LLM explainer module not found")
+    llm_explainer = None
 
-# In main():
-def main():
-    # ... existing code ...
-    
-    # Initialize evaluation system
-    evaluator = UserEvaluationSystem()
-    
-    # Initialize Ollama explainer
-    if 'explainer' not in st.session_state:
-        st.session_state.explainer = OllamaExplainer()
-    
-    # Add to sidebar
-    evaluator.render_feedback_form()
-    
-    # Show evaluation metrics (for demonstration)
-    if st.sidebar.button("📊 Show Evaluation Report"):
-        report = evaluator.generate_evaluation_report()
-        st.sidebar.success(f"Clarity Success: {report.get('clarity_success_rate', 0):.1f}%")
-        st.sidebar.success(f"Trust Success: {report.get('trust_success_rate', 0):.1f}%")
+# Optional database import
+try:
+    from utils.database import get_database
+except ImportError:
+    print("Warning: Database module not found")
+    get_database = None
 
-# Load environment variables
-load_dotenv()
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Page configuration with minimalistic theme
+# Page configuration
 st.set_page_config(
-    page_title="StockBot Advisor",
-    page_icon="📊",
+    page_title="StockBot Advisor - AI-Powered Investment Assistant",
+    page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded",
-    menu_items={
-        'About': """
-        # StockBot Advisor
-        AI-Powered Financial Advisory Platform
-        
-        **Author:** Anthony Winata Salim  
-        **Student Number:** 230726051  
-        **Course:** CM3070 Project
-        """
-    }
+    initial_sidebar_state="expanded"
 )
 
-# Load configuration
-@st.cache_resource
-def load_config():
-    """Load configuration from yaml file"""
-    with open('config.yaml', 'r') as file:
-        return yaml.safe_load(file)
-
-# Custom CSS for minimalistic design
-def load_custom_css():
-    """Apply custom CSS for minimalistic black/white/gray theme"""
-    st.markdown("""
-    <style>
-        /* Import Inter font for modern look */
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
-        
-        /* Global styles */
-        * {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-        }
-        
-        /* Main container */
-        .main {
-            padding: 2rem;
-            background-color: #FFFFFF;
-        }
-        
-        /* Headers */
-        h1, h2, h3 {
-            color: #000000;
-            font-weight: 300;
-            letter-spacing: -0.02em;
-        }
-        
-        h1 {
-            font-size: 2rem;
-            margin-bottom: 0.5rem;
-            border-bottom: 1px solid #E9ECEF;
-            padding-bottom: 1rem;
-        }
-        
-        /* Sidebar styling */
-        section[data-testid="stSidebar"] {
-            background-color: #F8F9FA;
-            border-right: 1px solid #E9ECEF;
-        }
-        
-        section[data-testid="stSidebar"] .block-container {
-            padding: 2rem 1rem;
-        }
-        
-        /* Metric cards */
-        div[data-testid="metric-container"] {
-            background-color: #FFFFFF;
-            border: 1px solid #E9ECEF;
-            padding: 1rem;
-            border-radius: 4px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-            margin: 0.5rem 0;
-        }
-        
-        div[data-testid="metric-container"] label {
-            color: #6C757D;
-            font-size: 0.875rem;
-            font-weight: 400;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-        
-        div[data-testid="metric-container"] div[data-testid="metric-value"] {
-            color: #000000;
-            font-size: 1.5rem;
-            font-weight: 500;
-        }
-        
-        /* Buttons */
-        .stButton > button {
-            background-color: #FFFFFF;
-            color: #000000;
-            border: 1px solid #000000;
-            border-radius: 4px;
-            padding: 0.5rem 1.5rem;
-            font-weight: 400;
-            transition: all 0.2s ease;
-            text-transform: none;
-            letter-spacing: 0;
-        }
-        
-        .stButton > button:hover {
-            background-color: #000000;
-            color: #FFFFFF;
-            border-color: #000000;
-        }
-        
-        /* Primary button style */
-        .stButton > button[kind="primary"] {
-            background-color: #000000;
-            color: #FFFFFF;
-            border: 1px solid #000000;
-        }
-        
-        .stButton > button[kind="primary"]:hover {
-            background-color: #212529;
-            border-color: #212529;
-        }
-        
-        /* Input fields */
-        .stTextInput > div > div > input,
-        .stSelectbox > div > div > select,
-        .stMultiSelect > div > div > div {
-            border: none;
-            border-bottom: 1px solid #E9ECEF;
-            border-radius: 0;
-            padding: 0.5rem 0;
-            background-color: transparent;
-            color: #000000;
-        }
-        
-        .stTextInput > div > div > input:focus,
-        .stSelectbox > div > div > select:focus {
-            border-bottom: 2px solid #000000;
-            box-shadow: none;
-        }
-        
-        /* Tables */
-        .dataframe {
-            border: none;
-            font-size: 0.875rem;
-        }
-        
-        .dataframe thead tr th {
-            background-color: #F8F9FA;
-            border-bottom: 2px solid #E9ECEF;
-            color: #000000;
-            font-weight: 500;
-            text-transform: uppercase;
-            font-size: 0.75rem;
-            letter-spacing: 0.05em;
-        }
-        
-        .dataframe tbody tr {
-            border-bottom: 1px solid #E9ECEF;
-        }
-        
-        .dataframe tbody tr:hover {
-            background-color: #F8F9FA;
-        }
-        
-        .dataframe tbody tr td {
-            color: #212529;
-            font-family: 'SF Mono', Monaco, monospace;
-        }
-        
-        /* Tabs */
-        .stTabs [data-baseweb="tab-list"] {
-            gap: 2rem;
-            border-bottom: 1px solid #E9ECEF;
-        }
-        
-        .stTabs [data-baseweb="tab"] {
-            height: 3rem;
-            padding: 0 1rem;
-            background-color: transparent;
-            border: none;
-            color: #6C757D;
-            font-weight: 400;
-        }
-        
-        .stTabs [aria-selected="true"] {
-            background-color: transparent;
-            border-bottom: 2px solid #000000;
-            color: #000000;
-            font-weight: 500;
-        }
-        
-        /* Expander */
-        .streamlit-expanderHeader {
-            background-color: #F8F9FA;
-            border: 1px solid #E9ECEF;
-            border-radius: 4px;
-            color: #000000;
-            font-weight: 400;
-        }
-        
-        .streamlit-expanderHeader:hover {
-            background-color: #E9ECEF;
-        }
-        
-        /* Info boxes */
-        .stAlert {
-            background-color: #F8F9FA;
-            border: 1px solid #E9ECEF;
-            border-radius: 4px;
-            color: #212529;
-        }
-        
-        /* Success/Error colors */
-        .success-text {
-            color: #28A745;
-            font-weight: 500;
-        }
-        
-        .error-text {
-            color: #DC3545;
-            font-weight: 500;
-        }
-        
-        /* Plotly charts */
-        .js-plotly-plot {
-            border: 1px solid #E9ECEF;
-            border-radius: 4px;
-            padding: 1rem;
-            background-color: #FFFFFF;
-        }
-        
-        /* Remove streamlit branding */
-        #MainMenu {visibility: hidden;}
-        footer {visibility: hidden;}
-        
-        /* Custom scrollbar */
-        ::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
-        }
-        
-        ::-webkit-scrollbar-track {
-            background: #F8F9FA;
-        }
-        
-        ::-webkit-scrollbar-thumb {
-            background: #6C757D;
-            border-radius: 4px;
-        }
-        
-        ::-webkit-scrollbar-thumb:hover {
-            background: #000000;
-        }
-        
-        /* Loading animation */
-        .stSpinner > div {
-            border-color: #000000;
-        }
-        
-        /* Divider */
-        hr {
-            border: none;
-            border-top: 1px solid #E9ECEF;
-            margin: 2rem 0;
-        }
-    </style>
-    """, unsafe_allow_html=True)
-
-# Initialize session state
-def init_session_state():
-    """Initialize all session state variables"""
-    if 'config' not in st.session_state:
-        st.session_state.config = load_config()
+def initialize_session_state():
+    """Initialize all session state variables with proper defaults"""
     
+    # Initialize portfolio with ALL required keys
+    if 'portfolio' not in st.session_state:
+        st.session_state.portfolio = {
+            'holdings': {},  # {symbol: {'shares': float, 'avg_cost': float}}
+            'cash': 100000.0,
+            'total_value': 100000.0,
+            'daily_return': 0.0,
+            'daily_return_pct': 0.0,
+            'total_return': 0.0,
+            'total_return_pct': 0.0,
+            'previous_total_value': 100000.0,
+            'transactions': [],
+            'last_updated': datetime.now().isoformat()
+        }
+    else:
+        # Ensure all required keys exist (for backward compatibility)
+        portfolio_defaults = {
+            'holdings': {},
+            'cash': 100000.0,
+            'total_value': 100000.0,
+            'daily_return': 0.0,
+            'daily_return_pct': 0.0,
+            'total_return': 0.0,
+            'total_return_pct': 0.0,
+            'previous_total_value': 100000.0,
+            'transactions': [],
+            'last_updated': datetime.now().isoformat()
+        }
+        
+        for key, default_value in portfolio_defaults.items():
+            if key not in st.session_state.portfolio:
+                st.session_state.portfolio[key] = default_value
+    
+    # Initialize user profile
     if 'user_profile' not in st.session_state:
         st.session_state.user_profile = {
             'name': 'Guest User',
+            'email': 'guest@stockbot.com',
             'risk_tolerance': 'Moderate',
             'investment_horizon': '1-3 years',
-            'initial_capital': 100000,
-            'currency': 'USD'
+            'initial_capital': 100000.0,
+            'currency': 'USD',
+            'experience_level': 'Intermediate',
+            'created_at': datetime.now().isoformat()
         }
     
-    if 'portfolio' not in st.session_state:
-        st.session_state.portfolio = {
-            'holdings': {},
-            'cash': 100000,
-            'total_value': 100000,
-            'daily_return': 0,
-            'total_return': 0
-        }
-    
+    # Initialize watchlist
     if 'watchlist' not in st.session_state:
-        # Initialize with 5 popular stocks
         st.session_state.watchlist = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA']
     
-    if 'market_data' not in st.session_state:
-        st.session_state.market_data = {}
+    # Initialize market data cache
+    if 'market_data_cache' not in st.session_state:
+        st.session_state.market_data_cache = {}
     
-    if 'last_update' not in st.session_state:
-        st.session_state.last_update = datetime.now()
+    # Initialize predictions cache
+    if 'predictions_cache' not in st.session_state:
+        st.session_state.predictions_cache = {}
     
-    if 'theme' not in st.session_state:
-        st.session_state.theme = 'minimal'
+    # Initialize UI state variables
+    if 'show_profile_editor' not in st.session_state:
+        st.session_state.show_profile_editor = False
+    
+    if 'show_report' not in st.session_state:
+        st.session_state.show_report = False
+    
+    # Initialize selected page
+    if 'selected_page' not in st.session_state:
+        st.session_state.selected_page = 'Dashboard'
+    
+    # Initialize backtest results
+    if 'backtest_results' not in st.session_state:
+        st.session_state.backtest_results = None
+    
+    # Initialize analysis preferences
+    if 'analysis_preferences' not in st.session_state:
+        st.session_state.analysis_preferences = {
+            'selected_stock': 'AAPL',
+            'analysis_period': '1y',
+            'show_indicators': True,
+            'show_ml_predictions': True,
+            'chart_type': 'candlestick'
+        }
 
-# Cache functions for data fetching
-@st.cache_data(ttl=300)  # Cache for 5 minutes
-def fetch_stock_data(symbol, period='1d'):
-    """Fetch stock data from yfinance"""
-    try:
-        ticker = yf.Ticker(symbol)
-        data = ticker.history(period=period)
-        info = ticker.info
-        return data, info
-    except Exception as e:
-        st.error(f"Error fetching data for {symbol}: {str(e)}")
-        return None, None
-
-@st.cache_data(ttl=300)
-def fetch_market_overview():
-    """Fetch market indices data"""
-    indices = {
-        '^GSPC': 'S&P 500',
-        '^DJI': 'Dow Jones',
-        '^IXIC': 'NASDAQ',
-        'SPY': 'SPY ETF'
+def apply_custom_css():
+    """Apply custom CSS for minimalistic design"""
+    st.markdown("""
+    <style>
+    /* Main theme - Minimalistic Black & White */
+    .stApp {
+        background-color: #FFFFFF;
     }
     
-    market_data = {}
-    for symbol, name in indices.items():
-        try:
-            ticker = yf.Ticker(symbol)
-            hist = ticker.history(period='2d')
-            if not hist.empty:
-                current = hist['Close'].iloc[-1]
-                prev = hist['Close'].iloc[-2] if len(hist) > 1 else current
-                change = ((current - prev) / prev) * 100 if prev != 0 else 0
-                market_data[name] = {
-                    'value': current,
-                    'change': change
-                }
-        except:
-            market_data[name] = {'value': 0, 'change': 0}
+    /* Sidebar styling */
+    .css-1d391kg {
+        background-color: #F8F9FA;
+    }
     
-    return market_data
+    /* Headers */
+    h1, h2, h3 {
+        color: #000000;
+        font-family: 'Inter', 'SF Pro Display', sans-serif;
+        font-weight: 600;
+    }
+    
+    /* Metrics */
+    [data-testid="metric-container"] {
+        background-color: #FFFFFF;
+        border: 1px solid #E5E5E5;
+        padding: 15px;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    
+    /* Buttons */
+    .stButton > button {
+        background-color: #000000;
+        color: #FFFFFF;
+        border: none;
+        padding: 8px 20px;
+        border-radius: 6px;
+        font-weight: 500;
+        transition: all 0.3s ease;
+    }
+    
+    .stButton > button:hover {
+        background-color: #333333;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    
+    /* Input fields */
+    .stTextInput > div > div > input {
+        border: 1px solid #E5E5E5;
+        border-radius: 6px;
+        padding: 8px 12px;
+    }
+    
+    /* Select boxes */
+    .stSelectbox > div > div {
+        border: 1px solid #E5E5E5;
+        border-radius: 6px;
+    }
+    
+    /* Data frames */
+    .dataframe {
+        border: none !important;
+        font-family: 'SF Mono', monospace;
+    }
+    
+    /* Success/Error messages */
+    .stSuccess {
+        background-color: #D4EDDA;
+        color: #155724;
+        padding: 12px;
+        border-radius: 6px;
+        border-left: 4px solid #28A745;
+    }
+    
+    .stError {
+        background-color: #F8D7DA;
+        color: #721C24;
+        padding: 12px;
+        border-radius: 6px;
+        border-left: 4px solid #DC3545;
+    }
+    
+    /* Tab styling */
+    .stTabs [data-baseweb="tab-list"] {
+        background-color: #F8F9FA;
+        border-radius: 8px;
+        padding: 4px;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        height: 40px;
+        padding: 0px 20px;
+        background-color: transparent;
+        border-radius: 6px;
+        color: #666666;
+        font-weight: 500;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background-color: #FFFFFF;
+        color: #000000;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    /* Expander */
+    .streamlit-expanderHeader {
+        background-color: #F8F9FA;
+        border-radius: 6px;
+        border: 1px solid #E5E5E5;
+    }
+    
+    /* Plotly charts */
+    .js-plotly-plot {
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+    
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+    
+    ::-webkit-scrollbar-track {
+        background: #F8F9FA;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+        background: #888;
+        border-radius: 4px;
+    }
+    
+    ::-webkit-scrollbar-thumb:hover {
+        background: #555;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-# Sidebar components
+def update_portfolio_values():
+    """Update portfolio values including daily returns"""
+    try:
+        data_processor = get_data_processor()
+        
+        # Ensure portfolio exists
+        if 'portfolio' not in st.session_state:
+            initialize_session_state()
+        
+        portfolio = st.session_state.portfolio
+        
+        # Calculate current portfolio value
+        total_value = portfolio.get('cash', 100000.0)
+        
+        # Add value of holdings
+        holdings = portfolio.get('holdings', {})
+        for symbol, holding in holdings.items():
+            try:
+                # Get current price
+                df = data_processor.fetch_stock_data(symbol, period='2d')
+                
+                if not df.empty:
+                    current_price = df['Close'].iloc[-1]
+                    previous_price = df['Close'].iloc[-2] if len(df) > 1 else current_price
+                    
+                    # Calculate position value
+                    shares = holding.get('shares', 0)
+                    current_value = shares * current_price
+                    previous_value = shares * previous_price
+                    
+                    # Add to total
+                    total_value += current_value
+                    
+                    # Track daily change for this position
+                    holding['current_price'] = current_price
+                    holding['current_value'] = current_value
+                    holding['daily_change'] = current_value - previous_value
+                    
+            except Exception as e:
+                logger.error(f"Error updating {symbol}: {e}")
+                # Use last known value if available
+                if 'current_value' in holding:
+                    total_value += holding['current_value']
+        
+        # Calculate daily return
+        previous_total = portfolio.get('previous_total_value', portfolio.get('total_value', 100000.0))
+        daily_return = total_value - previous_total
+        daily_return_pct = (daily_return / previous_total * 100) if previous_total > 0 else 0
+        
+        # Calculate total return from initial capital
+        initial_capital = st.session_state.user_profile.get('initial_capital', 100000.0)
+        total_return = total_value - initial_capital
+        total_return_pct = (total_return / initial_capital * 100) if initial_capital > 0 else 0
+        
+        # Update portfolio
+        portfolio.update({
+            'total_value': total_value,
+            'previous_total_value': previous_total,
+            'daily_return': daily_return,
+            'daily_return_pct': daily_return_pct,
+            'total_return': total_return,
+            'total_return_pct': total_return_pct,
+            'last_updated': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Error updating portfolio values: {e}")
+
 def render_sidebar():
-    """Render the sidebar with user profile and navigation"""
+    """Render the sidebar with user profile and portfolio info"""
     with st.sidebar:
-        # Logo/Title
-        st.markdown("# 📊 StockBot Advisor")
+        st.markdown("## 📈 StockBot Advisor")
         st.markdown("---")
         
         # User Profile Section
-        st.markdown("### User Profile")
-        col1, col2 = st.columns([2, 1])
+        st.markdown("### 👤 User Profile")
+        
+        col1, col2 = st.columns(2)
         with col1:
-            st.markdown(f"**{st.session_state.user_profile['name']}**")
+            st.write(f"**{st.session_state.user_profile.get('name', 'Guest User')}**")
         with col2:
             if st.button("Edit", key="edit_profile"):
-                st.session_state.show_profile_edit = True
+                st.session_state.show_profile_editor = not st.session_state.get('show_profile_editor', False)
         
-        st.caption(f"Risk: {st.session_state.user_profile['risk_tolerance']}")
-        st.caption(f"Horizon: {st.session_state.user_profile['investment_horizon']}")
+        st.write(f"Risk: {st.session_state.user_profile.get('risk_tolerance', 'Moderate')}")
+        st.write(f"Horizon: {st.session_state.user_profile.get('investment_horizon', '1-3 years')}")
+        
+        # Show profile editor if requested
+        if st.session_state.get('show_profile_editor', False):
+            with st.expander("Edit Profile", expanded=True):
+                new_name = st.text_input("Name", value=st.session_state.user_profile.get('name', 'Guest User'))
+                new_risk = st.select_slider(
+                    "Risk Tolerance",
+                    options=["Conservative", "Moderate", "Aggressive"],
+                    value=st.session_state.user_profile.get('risk_tolerance', 'Moderate')
+                )
+                new_horizon = st.selectbox(
+                    "Investment Horizon",
+                    ["< 1 year", "1-3 years", "3-5 years", "> 5 years"],
+                    index=1
+                )
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("Save", key="save_profile"):
+                        st.session_state.user_profile.update({
+                            'name': new_name,
+                            'risk_tolerance': new_risk,
+                            'investment_horizon': new_horizon
+                        })
+                        st.session_state.show_profile_editor = False
+                        st.rerun()
+                with col2:
+                    if st.button("Cancel", key="cancel_profile"):
+                        st.session_state.show_profile_editor = False
+                        st.rerun()
         
         st.markdown("---")
         
-        # Portfolio Summary
-        st.markdown("### Portfolio Summary")
-        st.metric("Total Value", f"${st.session_state.portfolio['total_value']:,.2f}")
-        col1, col2 = st.columns(2)
-        with col1:
-            change_color = "🟢" if st.session_state.portfolio['daily_return'] >= 0 else "🔴"
-            st.caption(f"{change_color} Daily: {st.session_state.portfolio['daily_return']:.2f}%")
-        with col2:
-            change_color = "🟢" if st.session_state.portfolio['total_return'] >= 0 else "🔴"
-            st.caption(f"{change_color} Total: {st.session_state.portfolio['total_return']:.2f}%")
+        # Portfolio Summary Section
+        st.markdown("### 💼 Portfolio Summary")
+        
+        # Update portfolio values before displaying
+        update_portfolio_values()
+        
+        # Get portfolio values safely
+        portfolio = st.session_state.portfolio
+        total_value = portfolio.get('total_value', 100000.0)
+        daily_return = portfolio.get('daily_return', 0.0)
+        daily_return_pct = portfolio.get('daily_return_pct', 0.0)
+        total_return = portfolio.get('total_return', 0.0)
+        total_return_pct = portfolio.get('total_return_pct', 0.0)
+        
+        st.markdown(f"**Total Value**")
+        st.markdown(f"# ${total_value:,.2f}")
+        
+        # Daily change display with safe color selection
+        change_color = "🟢" if daily_return >= 0 else "🔴"
+        st.markdown(f"{change_color} **Daily:** ${daily_return:+,.2f} ({daily_return_pct:+.2f}%)")
+        
+        # Total return display
+        return_color = "🟢" if total_return >= 0 else "🔴"
+        st.markdown(f"{return_color} **Total:** ${total_return:+,.2f} ({total_return_pct:+.2f}%)")
+        
+        st.markdown("---")
+        
+        # Watchlist Section
+        st.markdown("### 👁️ Watchlist")
+        
+        watchlist = st.session_state.get('watchlist', ['AAPL', 'MSFT', 'GOOGL'])
+        for symbol in watchlist[:5]:  # Show top 5
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                if st.button(symbol, key=f"watch_{symbol}", use_container_width=True):
+                    st.session_state.analysis_preferences['selected_stock'] = symbol
+                    st.session_state.selected_page = 'Analysis'
+                    st.rerun()
+            with col2:
+                # Show mini price indicator
+                try:
+                    data_processor = get_data_processor()
+                    df = data_processor.fetch_stock_data(symbol, period='2d')
+                    if not df.empty and len(df) > 1:
+                        change = ((df['Close'].iloc[-1] - df['Close'].iloc[-2]) / df['Close'].iloc[-2]) * 100
+                        color = "🟢" if change >= 0 else "🔴"
+                        st.write(f"{color} {change:+.1f}%")
+                except:
+                    st.write("--")
         
         st.markdown("---")
         
         # Quick Actions
-        st.markdown("### Quick Actions")
-        if st.button("🔄 Refresh Data", use_container_width=True):
-            st.cache_data.clear()
-            st.session_state.last_update = datetime.now()
-            st.rerun()
-        
-        if st.button("📊 Generate Report", use_container_width=True):
-            st.info("Report generation coming soon!")
-        
-        if st.button("🎯 Run Analysis", use_container_width=True):
-            st.info("Running analysis...")
+        st.markdown("### ⚡ Quick Actions")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔄 Refresh", key="refresh_data", use_container_width=True):
+                st.cache_data.clear()
+                st.rerun()
+        with col2:
+            if st.button("📊 Report", key="view_report", use_container_width=True):
+                st.session_state.show_report = True
         
         st.markdown("---")
         
         # Market Status
-        st.markdown("### Market Status")
-        now = datetime.now()
-        market_open = now.replace(hour=9, minute=30, second=0)
-        market_close = now.replace(hour=16, minute=0, second=0)
+        st.markdown("### 🌍 Market Status")
         
-        if now.weekday() < 5 and market_open <= now <= market_close:
-            st.success("🟢 Market Open")
-        else:
-            st.error("🔴 Market Closed")
+        # Determine market status based on current time
+        try:
+            import pytz
+            et_tz = pytz.timezone('US/Eastern')
+            current_time = datetime.now(et_tz)
+            market_open = current_time.replace(hour=9, minute=30, second=0)
+            market_close = current_time.replace(hour=16, minute=0, second=0)
+            
+            if current_time.weekday() < 5 and market_open <= current_time <= market_close:
+                st.success("🟢 Market Open")
+            else:
+                st.error("🔴 Market Closed")
+        except ImportError:
+            # Fallback if pytz is not installed
+            current_time = datetime.now()
+            if current_time.weekday() < 5 and 9 <= current_time.hour < 16:
+                st.success("🟢 Market Open")
+            else:
+                st.error("🔴 Market Closed")
         
-        st.caption(f"Last Update: {st.session_state.last_update.strftime('%H:%M:%S')}")
-        
-        st.markdown("---")
-        
-        # Footer
-        st.caption("CM3070 Project")
-        st.caption("© 2025 Anthony Winata Salim")
+        st.caption(f"Last updated: {datetime.now().strftime('%I:%M %p')}")
 
-# Main dashboard content
 def render_dashboard():
     """Render the main dashboard"""
-    # Header
-    st.markdown("# Stock Market Dashboard")
-    st.markdown("Real-time market data and AI-powered insights")
+    st.title("📊 Market Dashboard")
+    st.caption("Real-time market overview and AI-powered insights")
     
     # Market Overview
-    st.markdown("---")
     st.markdown("## Market Overview")
     
-    market_data = fetch_market_overview()
-    # Display market indices
-    if market_data and len(market_data) > 0:
-        cols = st.columns(len(market_data))
-        for i, (name, data) in enumerate(market_data.items()):
-            with cols[i]:
-                change_symbol = "↑" if data['change'] >= 0 else "↓"
-                change_color = "green" if data['change'] >= 0 else "red"
-                st.metric(
-                    label=name,
-                    value=f"${data['value']:,.2f}",
-                    delta=f"{change_symbol} {abs(data['change']):.2f}%"
-                )
-    else:
-        # Fallback display when no market data
-        st.info("Market data loading... Using synthetic data")
-        # Display sample market data
-        sample_data = {
-            'S&P 500': {'value': 4782.15, 'change': 0.85},
-            'NASDAQ': {'value': 15123.45, 'change': 1.23},
-            'DOW': {'value': 38456.78, 'change': 0.45},
-            'VIX': {'value': 18.65, 'change': -2.15}
-        }
-        cols = st.columns(len(sample_data))
-        for i, (name, data) in enumerate(sample_data.items()):
-            with cols[i]:
-                st.metric(
-                    label=name,
-                    value=f"${data['value']:,.2f}",
-                    delta=f"{data['change']:+.2f}%"
-                )
+    col1, col2, col3, col4 = st.columns(4)
     
-    # Tabs for different views
+    # Fetch market indices
+    data_processor = get_data_processor()
+    
+    indices = {
+        '^GSPC': 'S&P 500',
+        '^DJI': 'Dow Jones',
+        '^IXIC': 'NASDAQ',
+        '^VIX': 'VIX'
+    }
+    
+    for i, (symbol, name) in enumerate(indices.items()):
+        col = [col1, col2, col3, col4][i]
+        with col:
+            try:
+                df = data_processor.fetch_stock_data(symbol, period='2d')
+                if not df.empty and len(df) > 1:
+                    current = df['Close'].iloc[-1]
+                    previous = df['Close'].iloc[-2]
+                    change = ((current - previous) / previous) * 100
+                    
+                    st.metric(
+                        label=name,
+                        value=f"{current:,.2f}",
+                        delta=f"{change:+.2f}%"
+                    )
+                else:
+                    st.metric(label=name, value="--", delta="--")
+            except Exception as e:
+                st.metric(label=name, value="--", delta="--")
+    
     st.markdown("---")
-    tab1, tab2, tab3, tab4 = st.tabs(["📈 Watchlist", "🎯 AI Signals", "📊 Top Movers", "📰 Market News"])
+    
+    # AI Recommendations Section
+    st.markdown("## 🤖 AI Recommendations")
+    
+    tab1, tab2, tab3 = st.tabs(["🎯 Top Picks", "📈 Trending", "⚠️ Alerts"])
     
     with tab1:
-        render_watchlist()
+        render_top_picks()
     
     with tab2:
-        render_ai_signals()
+        render_trending_stocks()
     
     with tab3:
-        render_top_movers()
+        render_market_alerts()
     
-    with tab4:
-        render_market_news()
+    st.markdown("---")
+    
+    # Portfolio Performance
+    st.markdown("## 📊 Portfolio Performance")
+    render_portfolio_chart()
 
-def render_watchlist():
-    """Render watchlist component"""
-    st.markdown("### Your Watchlist")
+def render_top_picks():
+    """Render AI top stock picks"""
+    col1, col2, col3 = st.columns(3)
     
-    # Add stock to watchlist
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        new_symbol = st.text_input("Add Symbol", placeholder="Enter stock symbol...")
-    with col2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("Add", key="add_watchlist"):
-            if new_symbol and new_symbol.upper() not in st.session_state.watchlist:
-                st.session_state.watchlist.append(new_symbol.upper())
-                st.success(f"Added {new_symbol.upper()} to watchlist")
-                st.rerun()
+    # Sample top picks (replace with actual ML predictions)
+    picks = [
+        {'symbol': 'AAPL', 'signal': 'BUY', 'confidence': 78, 'reason': 'Strong momentum'},
+        {'symbol': 'MSFT', 'signal': 'HOLD', 'confidence': 65, 'reason': 'Consolidating'},
+        {'symbol': 'GOOGL', 'signal': 'BUY', 'confidence': 72, 'reason': 'Oversold bounce'}
+    ]
     
-    # Display watchlist
-    if st.session_state.watchlist:
-        watchlist_data = []
-        
-        for symbol in st.session_state.watchlist:
-            try:
-                ticker = yf.Ticker(symbol)
-                hist = ticker.history(period='2d')
-                if not hist.empty:
-                    current = hist['Close'].iloc[-1]
-                    prev = hist['Close'].iloc[-2] if len(hist) > 1 else current
-                    change = ((current - prev) / prev) * 100 if prev != 0 else 0
-                    volume = hist['Volume'].iloc[-1]
-                    
-                    watchlist_data.append({
-                        'Symbol': symbol,
-                        'Price': f"${current:.2f}",
-                        'Change': f"{change:+.2f}%",
-                        'Volume': f"{volume:,.0f}",
-                        'Action': '🗑️'
-                    })
-            except:
-                continue
-        
-        if watchlist_data:
-            df = pd.DataFrame(watchlist_data)
+    for i, pick in enumerate(picks):
+        col = [col1, col2, col3][i]
+        with col:
+            signal_color = "🟢" if pick['signal'] == 'BUY' else "🟡" if pick['signal'] == 'HOLD' else "🔴"
             
-            # Display with custom styling
-            st.dataframe(
-                df,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Symbol": st.column_config.TextColumn("Symbol", width="small"),
-                    "Price": st.column_config.TextColumn("Price", width="small"),
-                    "Change": st.column_config.TextColumn("Change", width="small"),
-                    "Volume": st.column_config.TextColumn("Volume", width="medium"),
-                    "Action": st.column_config.TextColumn("", width="small")
-                }
-            )
+            st.markdown(f"### {pick['symbol']}")
+            st.markdown(f"{signal_color} **{pick['signal']}**")
+            st.progress(pick['confidence'] / 100)
+            st.caption(f"Confidence: {pick['confidence']}%")
+            st.caption(f"Reason: {pick['reason']}")
+            
+            if st.button(f"Analyze", key=f"analyze_{pick['symbol']}"):
+                st.session_state.analysis_preferences['selected_stock'] = pick['symbol']
+                st.session_state.selected_page = 'Analysis'
+                st.rerun()
+
+def render_trending_stocks():
+    """Render trending stocks"""
+    data_processor = get_data_processor()
+    
+    # Get trending stocks (example with watchlist)
+    trending = st.session_state.get('watchlist', ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA'])
+    
+    # Create a DataFrame for display
+    trending_data = []
+    
+    for symbol in trending:
+        try:
+            df = data_processor.fetch_stock_data(symbol, period='5d')
+            if not df.empty:
+                current_price = df['Close'].iloc[-1]
+                change_1d = ((df['Close'].iloc[-1] - df['Close'].iloc[-2]) / df['Close'].iloc[-2]) * 100 if len(df) > 1 else 0
+                volume = df['Volume'].iloc[-1]
+                avg_volume = df['Volume'].mean()
+                volume_ratio = volume / avg_volume if avg_volume > 0 else 1
+                
+                trending_data.append({
+                    'Symbol': symbol,
+                    'Price': f"${current_price:.2f}",
+                    '1D Change': f"{change_1d:+.2f}%",
+                    'Volume vs Avg': f"{volume_ratio:.1f}x",
+                    'Trend': '📈' if change_1d > 0 else '📉'
+                })
+        except:
+            continue
+    
+    if trending_data:
+        df_trending = pd.DataFrame(trending_data)
+        st.dataframe(df_trending, use_container_width=True, hide_index=True)
     else:
-        st.info("Your watchlist is empty. Add stocks to track them here.")
+        st.info("No trending data available")
 
-def render_ai_signals():
-    """Render AI trading signals"""
-    st.markdown("### AI Trading Signals")
-    
-    # Sample signals (in production, these would come from ML model)
-    signals = [
-        {'Stock': 'AAPL', 'Signal': 'BUY', 'Confidence': 78, 'Reason': 'RSI oversold, MACD bullish crossover'},
-        {'Stock': 'MSFT', 'Signal': 'HOLD', 'Confidence': 65, 'Reason': 'Mixed indicators, await confirmation'},
-        {'Stock': 'GOOGL', 'Signal': 'SELL', 'Confidence': 72, 'Reason': 'Overbought conditions, divergence detected'},
+def render_market_alerts():
+    """Render market alerts"""
+    alerts = [
+        {'type': 'warning', 'message': 'VIX above 20 - Market volatility elevated'},
+        {'type': 'info', 'message': 'AAPL approaching 52-week high'},
+        {'type': 'success', 'message': 'Portfolio up 5% this month'}
     ]
     
-    for signal in signals:
-        col1, col2, col3 = st.columns([2, 1, 3])
-        
-        with col1:
-            if signal['Signal'] == 'BUY':
-                st.markdown(f"**{signal['Stock']}** - <span class='success-text'>BUY</span>", unsafe_allow_html=True)
-            elif signal['Signal'] == 'SELL':
-                st.markdown(f"**{signal['Stock']}** - <span class='error-text'>SELL</span>", unsafe_allow_html=True)
-            else:
-                st.markdown(f"**{signal['Stock']}** - HOLD")
-        
-        with col2:
-            st.progress(signal['Confidence'] / 100)
-            st.caption(f"{signal['Confidence']}% confidence")
-        
-        with col3:
-            st.caption(signal['Reason'])
-        
-        st.markdown("---")
+    for alert in alerts:
+        if alert['type'] == 'warning':
+            st.warning(f"⚠️ {alert['message']}")
+        elif alert['type'] == 'info':
+            st.info(f"ℹ️ {alert['message']}")
+        elif alert['type'] == 'success':
+            st.success(f"✅ {alert['message']}")
 
-def render_top_movers():
-    """Render top movers section"""
-    st.markdown("### Top Movers")
+def render_portfolio_chart():
+    """Render portfolio performance chart"""
+    # Generate sample data (replace with actual portfolio history)
+    dates = pd.date_range(end=datetime.now(), periods=30, freq='D')
+    values = 100000 + np.cumsum(np.random.randn(30) * 1000)
     
-    config = st.session_state.config
-    all_stocks = []
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=dates,
+        y=values,
+        mode='lines',
+        name='Portfolio Value',
+        line=dict(color='black', width=2),
+        fill='tozeroy',
+        fillcolor='rgba(0,0,0,0.05)'
+    ))
     
-    # Collect all stocks from config
-    for sector in ['technology', 'financial', 'healthcare']:
-        if sector in config['stocks']:
-            all_stocks.extend([s['symbol'] for s in config['stocks'][sector]])
+    fig.update_layout(
+        title="30-Day Portfolio Performance",
+        xaxis_title="Date",
+        yaxis_title="Value ($)",
+        height=400,
+        template='plotly_white',
+        hovermode='x unified',
+        showlegend=False
+    )
     
-    # Get random movers for demonstration
-    movers_data = []
-    for _ in range(5):
-        if all_stocks:
-            symbol = np.random.choice(all_stocks)
-            change = np.random.uniform(-5, 5)
-            movers_data.append({
-                'Symbol': symbol,
-                'Change': f"{change:+.2f}%",
-                'Volume': f"{np.random.randint(1000000, 10000000):,}"
-            })
-    
-    if movers_data:
-        df = pd.DataFrame(movers_data)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+    st.plotly_chart(fig, use_container_width=True)
 
-def render_market_news():
-    """Render market news section"""
-    st.markdown("### Latest Market News")
+def render_analysis():
+    """Render the analysis page"""
+    st.title("🔍 Stock Analysis")
     
-    # Sample news (in production, this would come from news API)
-    news_items = [
-        {
-            'title': 'Fed Signals Potential Rate Cuts in Q2 2025',
-            'time': '2 hours ago',
-            'summary': 'Federal Reserve officials hint at possible rate adjustments amid cooling inflation...'
-        },
-        {
-            'title': 'Tech Stocks Rally on AI Optimism',
-            'time': '4 hours ago',
-            'summary': 'Major technology companies see gains as AI adoption accelerates across industries...'
-        },
-        {
-            'title': 'Energy Sector Under Pressure',
-            'time': '6 hours ago',
-            'summary': 'Oil prices decline as supply concerns ease and demand forecasts are revised...'
-        }
-    ]
+    # Stock selector
+    col1, col2, col3 = st.columns([2, 1, 1])
     
-    for news in news_items:
-        st.markdown(f"**{news['title']}**")
-        st.caption(news['time'])
-        st.write(news['summary'])
-        st.markdown("---")
+    with col1:
+        selected_stock = st.selectbox(
+            "Select Stock",
+            options=['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA'],
+            index=0,
+            key="stock_selector"
+        )
+    
+    with col2:
+        period = st.selectbox(
+            "Time Period",
+            options=['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y'],
+            index=5,
+            key="period_selector"
+        )
+    
+    with col3:
+        if st.button("🔄 Refresh", key="refresh_analysis"):
+            st.cache_data.clear()
+            st.rerun()
+    
+    # Fetch and display data
+    data_processor = get_data_processor()
+    df = data_processor.fetch_stock_data(selected_stock, period=period)
+    
+    if not df.empty:
+        # Calculate indicators if TechnicalIndicators is available
+        if TechnicalIndicators:
+            df = TechnicalIndicators.calculate_all_indicators(df)
+        
+        # Display charts and analysis
+        st.markdown(f"## {selected_stock} Analysis")
+        
+        # Price chart
+        render_price_chart(df, selected_stock)
+        
+        # Metrics
+        render_stock_metrics(df, selected_stock)
+        
+        # Technical indicators
+        if TechnicalIndicators:
+            render_technical_indicators(df)
+        
+        # AI Prediction
+        render_ai_prediction(df, selected_stock)
+    else:
+        st.error("Unable to fetch data for the selected stock")
 
-# Main application
+def render_price_chart(df, symbol):
+    """Render interactive price chart"""
+    fig = make_subplots(
+        rows=3, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.05,
+        row_heights=[0.6, 0.2, 0.2],
+        subplot_titles=(f"{symbol} Price", "RSI", "Volume")
+    )
+    
+    # Candlestick chart
+    fig.add_trace(
+        go.Candlestick(
+            x=df.index,
+            open=df['Open'],
+            high=df['High'],
+            low=df['Low'],
+            close=df['Close'],
+            name='Price'
+        ),
+        row=1, col=1
+    )
+    
+    # Add moving averages if available
+    if 'SMA_20' in df.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=df.index,
+                y=df['SMA_20'],
+                mode='lines',
+                name='SMA 20',
+                line=dict(color='blue', width=1)
+            ),
+            row=1, col=1
+        )
+    
+    if 'SMA_50' in df.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=df.index,
+                y=df['SMA_50'],
+                mode='lines',
+                name='SMA 50',
+                line=dict(color='orange', width=1)
+            ),
+            row=1, col=1
+        )
+    
+    # RSI
+    if 'RSI' in df.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=df.index,
+                y=df['RSI'],
+                mode='lines',
+                name='RSI',
+                line=dict(color='purple')
+            ),
+            row=2, col=1
+        )
+        
+        # RSI levels
+        fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
+        fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+    
+    # Volume
+    fig.add_trace(
+        go.Bar(
+            x=df.index,
+            y=df['Volume'],
+            name='Volume',
+            marker_color='gray'
+        ),
+        row=3, col=1
+    )
+    
+    fig.update_layout(
+        height=700,
+        template='plotly_white',
+        showlegend=True,
+        hovermode='x unified'
+    )
+    
+    fig.update_xaxes(rangeslider_visible=False)
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+def render_stock_metrics(df, symbol):
+    """Render stock metrics"""
+    col1, col2, col3, col4 = st.columns(4)
+    
+    current_price = df['Close'].iloc[-1]
+    prev_close = df['Close'].iloc[-2] if len(df) > 1 else current_price
+    change = current_price - prev_close
+    change_pct = (change / prev_close) * 100 if prev_close > 0 else 0
+    
+    with col1:
+        st.metric("Current Price", f"${current_price:.2f}", f"{change_pct:+.2f}%")
+    
+    with col2:
+        st.metric("Day Range", f"${df['Low'].iloc[-1]:.2f} - ${df['High'].iloc[-1]:.2f}")
+    
+    with col3:
+        st.metric("Volume", f"{df['Volume'].iloc[-1]:,.0f}")
+    
+    with col4:
+        if 'RSI' in df.columns:
+            rsi = df['RSI'].iloc[-1]
+            rsi_signal = "Overbought" if rsi > 70 else "Oversold" if rsi < 30 else "Neutral"
+            st.metric("RSI", f"{rsi:.1f}", rsi_signal)
+
+def render_technical_indicators(df):
+    """Render technical indicators section"""
+    st.markdown("### 📊 Technical Indicators")
+    
+    indicators = {}
+    
+    if 'RSI' in df.columns:
+        indicators['RSI'] = df['RSI'].iloc[-1]
+    
+    if 'MACD' in df.columns:
+        indicators['MACD'] = df['MACD'].iloc[-1]
+    
+    if 'BB_Position' in df.columns:
+        indicators['BB Position'] = df['BB_Position'].iloc[-1] * 100
+    
+    if indicators:
+        indicator_df = pd.DataFrame([indicators])
+        st.dataframe(indicator_df, use_container_width=True)
+
+def render_ai_prediction(df, symbol):
+    """Render AI prediction section"""
+    st.markdown("### 🤖 AI Prediction")
+    
+    # Placeholder for ML prediction (implement actual model prediction)
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        signal = "BUY"  # Replace with actual prediction
+        signal_color = "🟢" if signal == "BUY" else "🟡" if signal == "HOLD" else "🔴"
+        st.markdown(f"### {signal_color} {signal}")
+    
+    with col2:
+        confidence = 75  # Replace with actual confidence
+        st.markdown("### Confidence")
+        st.progress(confidence / 100)
+        st.caption(f"{confidence}%")
+    
+    with col3:
+        st.markdown("### Explanation")
+        st.caption("Strong momentum with RSI recovering from oversold conditions")
+
+def render_portfolio():
+    """Render portfolio page"""
+    st.title("💼 Portfolio Management")
+    st.info("Portfolio management features coming soon!")
+
+def render_backtesting():
+    """Render backtesting page"""
+    st.title("📈 Strategy Backtesting")
+    st.info("Backtesting features coming soon!")
+
+def render_education():
+    """Render education page"""
+    st.title("🎓 Education Center")
+    st.info("Educational content coming soon!")
+
+def render_settings():
+    """Render settings page"""
+    st.title("⚙️ Settings")
+    st.info("Settings configuration coming soon!")
+
 def main():
-    # Initialize
-    init_session_state()
-    load_custom_css()
+    """Main application function"""
+    
+    # CRITICAL: Initialize session state first
+    initialize_session_state()
+    
+    # Apply custom CSS
+    apply_custom_css()
     
     # Render sidebar
     render_sidebar()
     
-    # Render main content
-    render_dashboard()
+    # Navigation
+    pages = {
+        "Dashboard": render_dashboard,
+        "Analysis": render_analysis,
+        "Portfolio": render_portfolio,
+        "Backtesting": render_backtesting,
+        "Education": render_education,
+        "Settings": render_settings
+    }
+    
+    # Page selector in main area
+    st.markdown("---")
+    selected_page = st.radio(
+        "Navigation",
+        list(pages.keys()),
+        horizontal=True,
+        key="page_selector",
+        label_visibility="collapsed"
+    )
+    st.markdown("---")
+    
+    # Render selected page
+    pages[selected_page]()
+    
+    # Footer
+    st.markdown("---")
+    st.caption("StockBot Advisor v1.0.0 | CM3070 Project | © 2025 Anthony Winata Salim")
 
 if __name__ == "__main__":
     main()

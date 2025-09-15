@@ -1,81 +1,117 @@
-# Financial Advisor Bot Configuration
-# Author: Anthony Winata Salim
-# Student Number: 230726051
+# StockBot Advisor Configuration
+# Complete configuration with 33 stocks across 4 sectors + benchmarks
 
 app:
   name: "StockBot Advisor"
   version: "1.0.0"
-  description: "AI-Powered Financial Advisory Platform"
+  description: "AI-Powered Investment Advisory System"
   author: "Anthony Winata Salim"
-  debug_mode: false
-
-# Stock Universe Configuration
+  
+# Stock Universe - 33 stocks + 4 ETFs
 stocks:
-  # Technology Sector (6 stocks)
   technology:
     - symbol: "AAPL"
       name: "Apple Inc."
-      weight: 0.08
+      sector: "Technology"
     - symbol: "MSFT"
       name: "Microsoft Corporation"
-      weight: 0.08
+      sector: "Technology"
     - symbol: "GOOGL"
       name: "Alphabet Inc."
-      weight: 0.07
+      sector: "Technology"
     - symbol: "NVDA"
       name: "NVIDIA Corporation"
-      weight: 0.06
+      sector: "Technology"
     - symbol: "META"
       name: "Meta Platforms Inc."
-      weight: 0.06
+      sector: "Technology"
     - symbol: "PLTR"
       name: "Palantir Technologies"
-      weight: 0.04
-
-  # Financial Sector (5 stocks)
+      sector: "Technology"
+  
   financial:
+    # Original 5 stocks
     - symbol: "JPM"
       name: "JPMorgan Chase & Co."
-      weight: 0.07
+      sector: "Banking"
     - symbol: "BAC"
       name: "Bank of America"
-      weight: 0.06
+      sector: "Banking"
     - symbol: "GS"
       name: "Goldman Sachs"
-      weight: 0.05
+      sector: "Banking"
     - symbol: "MS"
       name: "Morgan Stanley"
-      weight: 0.05
+      sector: "Banking"
     - symbol: "V"
       name: "Visa Inc."
-      weight: 0.06
-
-  # Healthcare Sector (4 stocks)
+      sector: "Financial Services"
+    # Additional 5 financial stocks
+    - symbol: "MA"
+      name: "Mastercard Inc."
+      sector: "Financial Services"
+    - symbol: "WFC"
+      name: "Wells Fargo & Company"
+      sector: "Banking"
+    - symbol: "AXP"
+      name: "American Express"
+      sector: "Financial Services"
+    - symbol: "BLK"
+      name: "BlackRock Inc."
+      sector: "Financial Services"
+    - symbol: "SPGI"
+      name: "S&P Global Inc."
+      sector: "Financial Services"
+  
+  real_estate:
+    - symbol: "PLD"
+      name: "Prologis Inc."
+      sector: "Real Estate"
+      subsector: "Industrial REITs"
+    - symbol: "AMT"
+      name: "American Tower Corp"
+      sector: "Real Estate"
+      subsector: "Infrastructure REITs"
+    - symbol: "EQIX"
+      name: "Equinix Inc."
+      sector: "Real Estate"
+      subsector: "Data Center REITs"
+    - symbol: "SPG"
+      name: "Simon Property Group"
+      sector: "Real Estate"
+      subsector: "Retail REITs"
+    - symbol: "O"
+      name: "Realty Income Corp"
+      sector: "Real Estate"
+      subsector: "Retail REITs"
+  
   healthcare:
     - symbol: "JNJ"
       name: "Johnson & Johnson"
-      weight: 0.06
+      sector: "Healthcare"
     - symbol: "PFE"
       name: "Pfizer Inc."
-      weight: 0.05
+      sector: "Healthcare"
     - symbol: "MRNA"
       name: "Moderna Inc."
-      weight: 0.04
+      sector: "Healthcare"
     - symbol: "UNH"
       name: "UnitedHealth Group"
-      weight: 0.06
-
-  # Market Benchmarks (3 ETFs)
+      sector: "Healthcare"
+  
   benchmarks:
     - symbol: "SPY"
-      name: "S&P 500 ETF"
-      description: "Market Benchmark"
+      name: "SPDR S&P 500 ETF"
+      type: "ETF"
     - symbol: "QQQ"
-      name: "NASDAQ 100 ETF"
-      description: "Tech Benchmark"
+      name: "Invesco QQQ Trust"
+      type: "ETF"
     - symbol: "DIA"
-      name: "Dow Jones ETF"
-      description: "Blue Chip Benchmark"
+      name: "SPDR Dow Jones Industrial Average ETF"
+      type: "ETF"
+    - symbol: "VNQ"
+      name: "Vanguard Real Estate ETF"
+      type: "REIT ETF"
 
 # Technical Indicators Configuration
 technical_indicators:
@@ -112,24 +148,24 @@ technical_indicators:
 ml_config:
   model_type: "RandomForest"
   parameters:
-    n_estimators: 300        # ✅ CHANGED from 100
-    max_depth: 12           # ✅ CHANGED from 10
-    min_samples_split: 10   # ✅ CHANGED from 5
-    min_samples_leaf: 4     # ✅ CHANGED from 2
-    max_features: "sqrt"    # ✅ ADDED
+    n_estimators: 300
+    max_depth: 12
+    min_samples_split: 10
+    min_samples_leaf: 4
+    max_features: "sqrt"
     random_state: 42
     
     # Gradient Boosting parameters
-    gb_n_estimators: 200    # ✅ ADDED
-    gb_max_depth: 8         # ✅ ADDED
-    gb_learning_rate: 0.1   # ✅ ADDED
-    gb_subsample: 0.8       # ✅ ADDED
+    gb_n_estimators: 200
+    gb_max_depth: 8
+    gb_learning_rate: 0.1
+    gb_subsample: 0.8
     
     # XGBoost parameters (if available)
-    xgb_n_estimators: 250   # ✅ ADDED
-    xgb_max_depth: 6        # ✅ ADDED
-    xgb_learning_rate: 0.1  # ✅ ADDED
-    xgb_subsample: 0.8      # ✅ ADDED
+    xgb_n_estimators: 250
+    xgb_max_depth: 6
+    xgb_learning_rate: 0.1
+    xgb_subsample: 0.8
   
   features:
     - "RSI"
@@ -139,71 +175,43 @@ ml_config:
     - "Stochastic_K"
     - "Volume_Ratio"
     - "ATR"
-    - "SMA_20"              # ✅ ADDED
-    - "SMA_50"              # ✅ ADDED
-    - "EMA_12"              # ✅ ADDED
-    - "EMA_26"              # ✅ ADDED
-    - "Volume_MA"           # ✅ ADDED
-    - "High_Low_Spread"     # ✅ ADDED
-    - "Close_Open_Spread"   # ✅ ADDED
+    - "SMA_20"
+    - "SMA_50"
+    - "EMA_12"
+    - "EMA_26"
+    - "Volume_MA"
+    - "High_Low_Spread"
+    - "Close_Open_Spread"
   
   training:
     test_size: 0.2
-    lookback_period: 90     # ✅ CHANGED from 60
+    lookback_period: 90
     prediction_horizon: 5
-    confidence_threshold: 0.70  # ✅ CHANGED from 0.65
-    cv_folds: 5             # ✅ ADDED
-    handle_imbalance: true  # ✅ ADDED
-    use_ensemble: true      # ✅ ADDED
-    calibrate_probabilities: true  # ✅ ADDED
-    feature_selection: true # ✅ ADDED
-    n_features: 50          # ✅ ADDED
-    selection_method: "mutual_info"  # ✅ ADDED
+    confidence_threshold: 0.70
+    cv_folds: 5
+    handle_imbalance: true
+    use_ensemble: true
+    calibrate_probabilities: true
+    feature_selection: true
+    n_features: 50
+    selection_method: "mutual_info"
 
 # Signal Generation
 signals:
-  buy_threshold: 0.02    # 2% expected gain
-  sell_threshold: -0.02  # 2% expected loss
+  buy_threshold: 0.02
+  sell_threshold: -0.02
   hold_range: [-0.02, 0.02]
   
   confidence_levels:
-    high: 0.70          # ✅ CHANGED from 0.75
-    medium: 0.60
-    low: 0.45
-
-# Data Configuration
-data:
-  default_period: "3y"   # ✅ CHANGED from "1y" for better training
-  update_frequency: 300  # seconds
-  cache_duration: 3600   # seconds
-  
-  periods:
-    - "1d"
-    - "5d"
-    - "1mo"
-    - "3mo"
-    - "6mo"
-    - "1y"
-    - "2y"
-    - "3y"    # ✅ ADDED
-    - "5y"
-
-# Signal Generation
-signals:
-  buy_threshold: 0.02    # 2% expected gain
-  sell_threshold: -0.02  # 2% expected loss
-  hold_range: [-0.02, 0.02]
-  
-  confidence_levels:
-    high: 0.75
+    high: 0.70
     medium: 0.60
     low: 0.45
 
 # Risk Management
 risk_management:
-  max_position_size: 0.10  # 10% max per position
-  stop_loss: 0.05          # 5% stop loss
-  take_profit: 0.15        # 15% take profit
+  max_position_size: 0.10
+  stop_loss: 0.05
+  take_profit: 0.15
   
   risk_levels:
     conservative:
@@ -223,9 +231,9 @@ risk_management:
 
 # Data Configuration
 data:
-  default_period: "1y"
-  update_frequency: 300  # seconds
-  cache_duration: 3600  # seconds
+  default_period: "3y"
+  update_frequency: 300
+  cache_duration: 3600
   
   periods:
     - "1d"
@@ -235,6 +243,7 @@ data:
     - "6mo"
     - "1y"
     - "2y"
+    - "3y"
     - "5y"
   
   intervals:
@@ -260,100 +269,90 @@ ui:
     danger: "#DC3545"
     warning: "#FFC107"
     info: "#17A2B8"
-  
-  layout:
-    sidebar_width: 300
-    main_container_width: 1200
-    chart_height: 500
-    table_rows_per_page: 10
-  
-  animations:
-    enabled: true
-    duration: 200  # milliseconds
-    easing: "ease-in-out"
-
-# Portfolio Configuration
-portfolio:
-  initial_capital: 100000
-  currency: "USD"
-  rebalance_frequency: "quarterly"
-  tax_rate: 0.15
-  transaction_cost: 0.001  # 0.1%
 
 # Backtesting Configuration
 backtesting:
-  start_date: "2022-01-01"
-  end_date: "2024-12-31"
-  initial_capital: 100000
-  commission: 0.001
-  slippage: 0.001
+  strategies:
+    - "MA Crossover"
+    - "RSI Mean Reversion"
+    - "MACD Momentum"
+    - "Bollinger Bands"
+    - "ML-Based (Enhanced)"
   
-  metrics:
+  commission: 0.001
+  slippage: 0.0005
+  initial_capital: 100000
+  
+  performance_metrics:
     - "total_return"
-    - "annual_return"
     - "sharpe_ratio"
     - "max_drawdown"
     - "win_rate"
     - "profit_factor"
 
+# Dashboard Configuration
+dashboard:
+  default_view: "overview"
+  refresh_interval: 60
+  
+  widgets:
+    - "portfolio_summary"
+    - "market_overview"
+    - "top_movers"
+    - "ai_signals"
+    - "risk_metrics"
+    - "news_feed"
+  
+  chart_settings:
+    default_period: "1d"
+    candlestick: true
+    volume: true
+    indicators: ["SMA_20", "SMA_50", "RSI"]
+
 # Notification Settings
 notifications:
-  email:
-    enabled: false
-    smtp_server: "smtp.gmail.com"
-    smtp_port: 587
+  enable_email: false
+  enable_push: false
+  enable_in_app: true
   
-  alerts:
-    price_change_threshold: 0.05  # 5%
-    volume_spike_threshold: 2.0   # 2x average
-    rsi_extreme_threshold: [20, 80]
-    
+  triggers:
+    - "high_confidence_signal"
+    - "stop_loss_hit"
+    - "portfolio_rebalance"
+    - "large_price_movement"
+
 # Database Configuration
 database:
   type: "sqlite"
   path: "data/stockbot.db"
   
   tables:
-    - "users"
-    - "portfolios"
+    - "portfolio"
     - "transactions"
-    - "watchlists"
-    - "alerts"
     - "predictions"
+    - "backtest_results"
+    - "user_settings"
 
 # API Configuration
 api:
   yfinance:
-    max_retries: 3
+    rate_limit: 2000
     timeout: 30
-    rate_limit: 10  # requests per second
   
-  news_api:
+  sentiment:
     enabled: false
     provider: "newsapi"
     
 # Logging Configuration
 logging:
   level: "INFO"
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
   file: "logs/stockbot.log"
   max_size: "10MB"
   backup_count: 5
 
-# Feature Flags
-features:
-  real_time_updates: true
-  advanced_charts: true
-  portfolio_optimization: true
-  news_sentiment: false
-  options_analysis: false
-  crypto_support: false
-  social_features: false
-  
-# Performance Settings
-performance:
-  enable_caching: true
-  cache_ttl: 300  # seconds
-  max_workers: 4
-  chunk_size: 100
-  lazy_loading: true
+# Performance Optimization
+optimization:
+  cache_enabled: true
+  parallel_processing: true
+  batch_size: 100
+  memory_limit: "2GB"
