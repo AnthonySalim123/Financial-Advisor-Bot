@@ -410,10 +410,7 @@ class MLModel:
                 )
     
     def engineer_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Advanced feature engineering for 70%+ accuracy
-        Creates 60+ features from price, volume, and technical data
-        """
+        
         features = df.copy()
         
         # === Price-based Features ===

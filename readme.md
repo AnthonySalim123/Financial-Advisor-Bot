@@ -228,32 +228,3 @@ This is an academic project for CM3070. For educational collaboration:
 3. Commit your changes
 4. Push to the branch
 5. Open a pull request
-
-## 📄 License
-
-This project is part of the University of London BSc Computer Science program.
-For academic use only.
-
-## 🙏 Acknowledgments
-
-- University of London International Programmes
-- Supervisor: Hwa Heng Kan
-- Course: CM3070 Project
-- Template: CM3020 Artificial Intelligence - Financial Advisor Bot
-
-## 📞 Contact
-
-**Author**: Anthony Winata Salim  
-**Student Number**: 230726051  
-**Email**: [your-email@domain.com]  
-**Project Repository**: [GitHub Link]
-
-## 🚦 Project Status
-
-Current Version: 1.0.0  
-Status: In Development  
-Last Updated: January 2025
-
----
-
-*This project demonstrates the integration of machine learning, technical analysis, and user experience design to create a practical tool for investment decision support.*
